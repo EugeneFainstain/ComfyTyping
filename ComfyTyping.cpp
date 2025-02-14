@@ -147,6 +147,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
+            {
+                HDC hScreenDC = GetDC(NULL); // Get the desktop DC
+                HDC hMemDC = CreateCompatibleDC(hScreenDC);
+
+                int width = 300, height = 200; // Define the region to capture
+                HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
+                SelectObject(hMemDC, hBitmap);
+
+                // Copy from screen to memory DC
+                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 100, 100, SRCCOPY);
+
+                ReleaseDC(NULL, hScreenDC);
+
+                BitBlt(hdc, 50, 50, width, height, hMemDC, 0, 0, SRCCOPY);
+
+                DeleteDC(hMemDC);
+            }
             EndPaint(hWnd, &ps);
         }
         break;

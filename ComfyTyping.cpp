@@ -11,11 +11,23 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
+#define INVALIDATE_ON_TIMER    2
+#define INVALIDATE_ON_HOOK     3
+#define INVALIDATE_METHOD   INVALIDATE_ON_HOOK //INVALIDATE_ON_TIMER //3  
+
+HWND g_myWindowHandle = nullptr;
+HWINEVENTHOOK g_hEventHook = nullptr;
+
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
+HWND                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+
+#if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
+    #define TIMER_ID       1001  // Unique timer ID
+    #define TIMER_INTERVAL 16    // 16 ms interval
+#endif
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -33,12 +45,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     MyRegisterClass(hInstance);
 
     // Perform application initialization:
-    if (!InitInstance (hInstance, nCmdShow))
+    g_myWindowHandle = InitInstance(hInstance, nCmdShow);
+
+    if (!g_myWindowHandle)
     {
         return FALSE;
     }
 
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_COMFYTYPING));
+
+#if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
+    SetTimer(g_myWindowHandle, TIMER_ID, TIMER_INTERVAL, NULL); // Start the timer
+#endif
 
     MSG msg;
 
@@ -55,7 +73,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     return (int) msg.wParam;
 }
 
+#if INVALIDATE_METHOD == INVALIDATE_ON_HOOK
+void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
+                           LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
+    if (hwnd != g_myWindowHandle) {  // Ignore own window
+        InvalidateRect(g_myWindowHandle, NULL, FALSE);
+    }
+}
 
+void StartDesktopMonitor() {
+    g_hEventHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_NAMECHANGE,
+                                 NULL, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+}
+
+void StopDesktopMonitor() {
+    if (g_hEventHook) UnhookWinEvent(g_hEventHook);
+}
+#endif // INVALIDATE_METHOD == INVALIDATE_ON_HOOK
 
 //
 //  FUNCTION: MyRegisterClass()
@@ -93,7 +127,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //        In this function, we save the instance handle in a global variable and
 //        create and display the main program window.
 //
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // Store instance handle in our global variable
 
@@ -102,13 +136,21 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    if (!hWnd)
    {
-      return FALSE;
+      return hWnd;
    }
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
 
-   return TRUE;
+   // Make topmost
+   SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+#if INVALIDATE_METHOD == INVALIDATE_ON_HOOK
+   // Start monitoring desktop for changes
+   StartDesktopMonitor();
+#endif
+
+   return hWnd;
 }
 
 //
@@ -123,6 +165,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    bool bDestroy = false;
+
     switch (message)
     {
     case WM_COMMAND:
@@ -142,6 +186,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
         break;
+#if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
+    case WM_TIMER:
+        if (wParam == TIMER_ID) // Ensure it's our specific timer
+        {
+            InvalidateRect(hWnd, NULL, FALSE);
+        }
+        break;
+#endif
+    case WM_MOVING:
+    case WM_SIZING:
+        ValidateRect(hWnd, NULL);
+        break;
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
@@ -151,16 +207,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
 
-                int width = 300, height = 200; // Define the region to capture
+                int width = 600, height = 400; // Define the region to capture
                 HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
                 SelectObject(hMemDC, hBitmap);
 
                 // Copy from screen to memory DC
-                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 100, 100, SRCCOPY);
+                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
 
                 ReleaseDC(NULL, hScreenDC);
 
-                BitBlt(hdc, 50, 50, width, height, hMemDC, 0, 0, SRCCOPY);
+                BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
 
                 DeleteDC(hMemDC);
             }
@@ -168,11 +224,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_DESTROY:
-        PostQuitMessage(0);
+        bDestroy = true;
         break;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
+    //////////////////////////////////////////////
+
+    if (bDestroy)
+    {
+        #if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
+            KillTimer(hWnd, TIMER_ID); // Kill the timer
+        #endif
+
+        #if INVALIDATE_METHOD == INVALIDATE_ON_HOOK
+            StopDesktopMonitor(); // Stop monitoring desktop for changes
+        #endif
+
+        PostQuitMessage(0);
+    }
+
     return 0;
 }
 

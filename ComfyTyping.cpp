@@ -3,6 +3,9 @@
 
 #include "framework.h"
 #include "ComfyTyping.h"
+#include <oleacc.h>  // Include for IAccessible
+
+#pragma comment(lib, "Oleacc.lib")  // Link the required library
 
 #define MAX_LOADSTRING 100
 
@@ -11,12 +14,12 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
-#define INVALIDATE_ON_TIMER    2
-#define INVALIDATE_ON_HOOK     3
-#define INVALIDATE_METHOD   INVALIDATE_ON_HOOK //INVALIDATE_ON_TIMER //3  
+#define INVALIDATE_ON_TIMER
+#define INVALIDATE_ON_HOOK
 
-HWND g_myWindowHandle = nullptr;
-HWINEVENTHOOK g_hEventHook = nullptr;
+HWND          g_myWindowHandle = nullptr;
+HWINEVENTHOOK g_hEventHook     = nullptr;
+int           g_iCaretY        = 0;
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -24,10 +27,13 @@ HWND                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
-#if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
-    #define TIMER_ID       1001  // Unique timer ID
-    #define TIMER_INTERVAL 16    // 16 ms interval
+#ifdef INVALIDATE_ON_TIMER
+    #define INVALIDATE_TIMER_ID       1001  // Unique timer ID
+    #define INVALIDATE_TIMER_INTERVAL 16    // 16 ms interval
 #endif
+
+#define CARET_TIMER_ID       1002   // Unique timer ID
+#define CARET_TIMER_INTERVAL 1 //16 // 16 ms interval
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -56,9 +62,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_COMFYTYPING));
 
-#if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
-    SetTimer(g_myWindowHandle, TIMER_ID, TIMER_INTERVAL, NULL); // Start the timer
+#ifdef INVALIDATE_ON_TIMER
+    SetTimer(g_myWindowHandle, INVALIDATE_TIMER_ID, INVALIDATE_TIMER_INTERVAL, NULL); // Start the timer
 #endif
+
+    SetTimer(g_myWindowHandle, CARET_TIMER_ID, CARET_TIMER_INTERVAL, NULL); // Start the timer
 
     MSG msg;
 
@@ -75,7 +83,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     return (int) msg.wParam;
 }
 
-#if INVALIDATE_METHOD == INVALIDATE_ON_HOOK
+#ifdef INVALIDATE_ON_HOOK
 void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
                            LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
     if (hwnd != g_myWindowHandle) {  // Ignore own window
@@ -91,7 +99,7 @@ void StartDesktopMonitor() {
 void StopDesktopMonitor() {
     if (g_hEventHook) UnhookWinEvent(g_hEventHook);
 }
-#endif // INVALIDATE_METHOD == INVALIDATE_ON_HOOK
+#endif // INVALIDATE_ON_HOOK
 
 //
 //  FUNCTION: MyRegisterClass()
@@ -131,28 +139,28 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //
 HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   hInst = hInstance; // Store instance handle in our global variable
+    hInst = hInstance; // Store instance handle in our global variable
 
-   HWND hWnd = CreateWindowExW(WS_EX_COMPOSITED, szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+    HWND hWnd = CreateWindowExW(WS_EX_COMPOSITED, szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
 
-   if (!hWnd)
-   {
-      return hWnd;
-   }
+    if (!hWnd)
+    {
+       return hWnd;
+    }
 
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
 
-   // Make topmost
-   SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    // Make topmost
+    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
-#if INVALIDATE_METHOD == INVALIDATE_ON_HOOK
-   // Start monitoring desktop for changes
-   StartDesktopMonitor();
+#ifdef INVALIDATE_ON_HOOK
+    // Start monitoring desktop for changes
+    StartDesktopMonitor();
 #endif
 
-   return hWnd;
+    return hWnd;
 }
 
 void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
@@ -161,6 +169,7 @@ void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
     CURSORINFO ci;
     ci.cbSize = sizeof(CURSORINFO);
     if (GetCursorInfo(&ci) && ci.flags == CURSOR_SHOWING)
+//    if (ci.hCursor == LoadCursor(NULL, IDC_IBEAM)) // or - "if not arrow, not size, etc...."
     {
         // Get DPI scaling factor
         int dpi = GetDpiForWindow(hWnd);  // Windows 8.1+ (Use 96 DPI as base)
@@ -199,6 +208,67 @@ void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
     }
 }
 
+int GetCaretY()
+{
+    GUITHREADINFO gti;
+    gti.cbSize = sizeof(GUITHREADINFO);
+
+    // Get caret info from the active thread
+    if (GetGUIThreadInfo(0, &gti))
+        if (gti.hwndCaret)
+            return gti.rcCaret.top;
+
+    return 0;
+}
+
+int GetCaretPositionFromAccessibility()
+{
+    long x=0,y=0,w=0,h=0;
+
+    HWND hWnd = GetForegroundWindow();
+
+    static HWND hPrevWnd     = nullptr;
+    static IAccessible* pAcc = nullptr;
+
+    if (hWnd != hPrevWnd)
+    {
+        if (pAcc)
+        {
+            pAcc->Release();
+            pAcc = nullptr;
+        }
+
+        if (AccessibleObjectFromWindow(hWnd, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK)
+        {
+            hPrevWnd = hWnd;
+        }
+    }
+
+    VARIANT varChild = {}; // CHILDID_SELF
+    if (pAcc)
+    {
+        // Get the caret's screen position
+        if (pAcc->accLocation(&x, &y, &w, &h, varChild) == S_OK)
+            { int i = 5; }
+        //OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
+    }
+
+//     IAccessible* pAcc = nullptr;
+//     VARIANT varChild = {}; // CHILDID_SELF
+//     if (AccessibleObjectFromWindow(hWnd, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK) {
+//         if (pAcc) {
+//             // Get the caret's screen position
+//             if (pAcc->accLocation(&x, &y, &w, &h, varChild) == S_OK) {
+//                 //std::cout << "Caret Position: X=" << caretPos.x << " Y=" << caretPos.y << std::endl;
+//                 OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
+//             }
+//             pAcc->Release();
+//         }
+//     }
+
+    return (int)y;
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -232,14 +302,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
         break;
-#if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
     case WM_TIMER:
-        if (wParam == TIMER_ID) // Ensure it's our specific timer
+#ifdef INVALIDATE_ON_TIMER
+        if (wParam == INVALIDATE_TIMER_ID) // Ensure it's our specific timer
         {
             InvalidateRect(hWnd, NULL, FALSE);
         }
-        break;
 #endif
+        if (wParam == CARET_TIMER_ID) // Ensure it's our specific timer
+        {
+            int y = GetCaretY();
+
+            if (y == 0)
+                y = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
+
+            g_iCaretY = y;
+        }
+        break;
     case WM_MOVING:
     case WM_SIZING:
         ValidateRect(hWnd, NULL);
@@ -253,12 +332,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
 
-                int width = 600, height = 400; // Define the region to capture
+                int width = GetSystemMetrics(SM_CXSCREEN), height = 400; // Define the region to capture
                 HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
                 SelectObject(hMemDC, hBitmap);
 
+                int iCaretY = g_iCaretY; // Calling GetCaretPositionFromAccessibility() here is too slow...
+
                 // Copy from screen to memory DC
-                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, iCaretY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
 
                 ReleaseDC(NULL, hScreenDC);
 
@@ -283,11 +364,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     if (bDestroy)
     {
-        #if INVALIDATE_METHOD == INVALIDATE_ON_TIMER
-            KillTimer(hWnd, TIMER_ID); // Kill the timer
+        #ifdef INVALIDATE_ON_TIMER
+            KillTimer(hWnd, INVALIDATE_TIMER_ID); // Kill the timer
         #endif
 
-        #if INVALIDATE_METHOD == INVALIDATE_ON_HOOK
+        #ifdef INVALIDATE_ON_HOOK
             StopDesktopMonitor(); // Stop monitoring desktop for changes
         #endif
 

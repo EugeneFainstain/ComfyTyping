@@ -37,6 +37,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+    SetProcessDPIAware();  // Enable DPI awareness (Windows 7+)
+
     // TODO: Place code here.
 
     // Initialize global strings
@@ -131,7 +133,7 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // Store instance handle in our global variable
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+   HWND hWnd = CreateWindowExW(WS_EX_COMPOSITED, szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
@@ -151,6 +153,50 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 #endif
 
    return hWnd;
+}
+
+void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
+{
+    // Get cursor info
+    CURSORINFO ci;
+    ci.cbSize = sizeof(CURSORINFO);
+    if (GetCursorInfo(&ci) && ci.flags == CURSOR_SHOWING)
+    {
+        // Get DPI scaling factor
+        int dpi = GetDpiForWindow(hWnd);  // Windows 8.1+ (Use 96 DPI as base)
+        float scaleFactor = dpi / 96.0f;
+
+        // Get the cursor bitmap
+        ICONINFO iconInfo;
+        GetIconInfo(ci.hCursor, &iconInfo);
+
+        // Get original cursor size
+        BITMAP bmp;
+        GetObject(iconInfo.hbmMask, sizeof(BITMAP), &bmp);
+        int cursorWidth = bmp.bmWidth;
+        int cursorHeight = bmp.bmHeight;
+
+        // Scale the cursor size
+        int scaledWidth = (int)(cursorWidth * scaleFactor);
+        int scaledHeight = (int)(cursorHeight * scaleFactor);
+
+        // Adjust cursor position based on the hotspot
+        int hotspotX = (int)(iconInfo.xHotspot * scaleFactor);
+        int hotspotY = (int)(iconInfo.yHotspot * scaleFactor);
+
+        // Convert cursor screen position to local coordinates, accounting for the hotspot
+        POINT cursorPos = ci.ptScreenPos;
+        int drawX = cursorPos.x - hotspotX;
+        int drawY = cursorPos.y - hotspotY;
+
+        // Draw the scaled cursor
+        DrawIconEx(hTargetDC, drawX, drawY, ci.hCursor,
+                   scaledWidth, scaledHeight, 0, NULL, DI_NORMAL);
+
+        // Clean up
+        DeleteObject(iconInfo.hbmMask);
+        DeleteObject(iconInfo.hbmColor);
+    }
 }
 
 //
@@ -212,11 +258,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 SelectObject(hMemDC, hBitmap);
 
                 // Copy from screen to memory DC
-                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
+                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
 
                 ReleaseDC(NULL, hScreenDC);
 
+                RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
+
                 BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
+
+                // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
 
                 DeleteDC(hMemDC);
             }

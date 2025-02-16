@@ -20,6 +20,7 @@ WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 HWND          g_myWindowHandle = nullptr;
 HWINEVENTHOOK g_hEventHook     = nullptr;
 int           g_iCaretY        = 0;
+float         g_fScaleFactor   = 1.0f;
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -175,6 +176,8 @@ void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
         int dpi = GetDpiForWindow(hWnd);  // Windows 8.1+ (Use 96 DPI as base)
         float scaleFactor = dpi / 96.0f;
 
+        g_fScaleFactor = scaleFactor;
+
         // Get the cursor bitmap
         ICONINFO iconInfo;
         GetIconInfo(ci.hCursor, &iconInfo);
@@ -215,8 +218,25 @@ int GetCaretY()
 
     // Get caret info from the active thread
     if (GetGUIThreadInfo(0, &gti))
-        if (gti.hwndCaret)
-            return gti.rcCaret.top;
+    if (gti.hwndCaret)
+    {
+        POINT caretPos = { 0, 0 };
+
+        // Get caret position in local (client) coordinates
+        caretPos.x = gti.rcCaret.left;
+        caretPos.y = gti.rcCaret.top;
+
+        // Convert client coordinates to screen coordinates
+        ClientToScreen(gti.hwndCaret, &caretPos);
+        
+        if( caretPos.y > 2160*3 )
+        { int i = 5; }
+
+        if( caretPos.y < 0 )
+        { int i = 5; }
+
+        return caretPos.y;
+    }
 
     return 0;
 }
@@ -269,6 +289,23 @@ int GetCaretPositionFromAccessibility()
     return (int)y;
 }
 
+int GetFontHeight(HWND hWnd) {
+    HDC hdc = GetDC(hWnd);
+
+    // Get the font used by the window
+    HFONT hFont = (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0);
+    if (hFont) {
+        SelectObject(hdc, hFont);
+    }
+
+    // Retrieve font metrics
+    TEXTMETRIC tm;
+    GetTextMetrics(hdc, &tm);
+
+    ReleaseDC(hWnd, hdc);
+    return (int)(tm.tmHeight * g_fScaleFactor + 0.5f);
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -316,6 +353,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (y == 0)
                 y = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
 
+            if ((y < 0) || (y > GetSystemMetrics(SM_CYSCREEN)))
+                y = 0;
+
             g_iCaretY = y;
         }
         break;
@@ -332,11 +372,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
 
-                int width = GetSystemMetrics(SM_CXSCREEN), height = 400; // Define the region to capture
+                int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN) / 16; // Define the region to capture
                 HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
                 SelectObject(hMemDC, hBitmap);
 
                 int iCaretY = g_iCaretY; // Calling GetCaretPositionFromAccessibility() here is too slow...
+
+                int iFontHeight = GetFontHeight(hWnd);
+
+                if( iCaretY != 0 )
+                    iCaretY -= iFontHeight * 2;
 
                 // Copy from screen to memory DC
                 BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, iCaretY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
@@ -348,7 +393,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
 
                 // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
-
+                DeleteObject(hBitmap);
                 DeleteDC(hMemDC);
             }
             EndPaint(hWnd, &ps);

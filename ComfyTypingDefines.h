@@ -3,6 +3,7 @@
 #define INVALIDATE_ON_TIMER
 #define INVALIDATE_ON_HOOK
 //#define RENDER_CURSOR // It seems that we don't need this for our use case...
+//#define USE_FONT_HEIGHT
 
 
 

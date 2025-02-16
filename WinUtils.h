@@ -10,10 +10,11 @@
     #define MYGLOBAL(x,y,z) extern x y
 #endif
 
-MYGLOBAL(HWND         , g_myWindowHandle  , nullptr);
-MYGLOBAL(HWINEVENTHOOK, g_hEventHook      , nullptr);
-MYGLOBAL(int          , g_iCaretY         , 0      );
-MYGLOBAL(float        , g_fDpiScaleFactor , 1.0f   );
+MYGLOBAL(HWND         , g_myWindowHandle   , nullptr);
+MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
+MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
+MYGLOBAL(int          , g_iCaretY          , 0      );
+MYGLOBAL(float        , g_fDpiScaleFactor  , 1.0f   );
 
 
 void OutputDebugFormatA(const char* format, ...);
@@ -21,8 +22,11 @@ void OutputDebugFormatA(const char* format, ...);
 float GetDpiScaleFactor(HWND hWnd);
 int GetCaretY();
 int GetCaretPositionFromAccessibility();
-int GetFontHeight(HWND hWnd);
+
+#ifdef USE_FONT_HEIGHT
+    int GetFontHeight(HWND hWnd);
+#endif
 
 #ifdef RENDER_CURSOR
-void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height);
+    void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height);
 #endif

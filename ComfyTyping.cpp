@@ -212,7 +212,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
             {
-                g_fDpiScaleFactor = GetDpiScaleFactor(hWnd); // Update DPI scaling factor
+                g_fDpiScaleFactor   = GetDpiScaleFactor(hWnd); // Update DPI scaling factor
+                g_hForegroundWindow = GetForegroundWindow();
 
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
@@ -223,10 +224,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 int iCaretY = g_iCaretY; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
-                int iFontHeight = GetFontHeight(hWnd);
-
                 if( iCaretY != 0 )
-                    iCaretY -= iFontHeight * 2;
+                {
+                    #ifdef USE_FONT_HEIGHT
+                        int iFontHeight = GetFontHeight(g_hForegroundWindow);
+                    #endif
+                    //iCaretY -= iFontHeight * 2;
+                    iCaretY -= height / 2;
+                    //iCaretY -= (int)(height - iFontHeight * g_fDpiScaleFactor / 2.0 ) / 2;
+                    //iCaretY -= (int)(height - iFontHeight * g_fDpiScaleFactor ) / 2;
+                    //iCaretY -= (int)(height - iFontHeight ) / 2;
+                    //iCaretY -= (int)(height - iFontHeight / 2 ) / 2;
+                }
 
                 // Copy from screen to memory DC
                 BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, iCaretY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),

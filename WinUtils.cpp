@@ -34,22 +34,28 @@ int GetCaretY()
     if (GetGUIThreadInfo(0, &gti))
     if (gti.hwndCaret)
     {
-        POINT caretPos = { 0, 0 };
+        POINT caretPos_LT = { 0, 0 };
+        POINT caretPos_RB = { 0, 0 };
 
         // Get caret position in local (client) coordinates
-        caretPos.x = gti.rcCaret.left;
-        caretPos.y = gti.rcCaret.top;
+        caretPos_LT.x = gti.rcCaret.left;
+        caretPos_LT.y = gti.rcCaret.top;
+        caretPos_RB.x = gti.rcCaret.right;
+        caretPos_RB.y = gti.rcCaret.bottom;
 
         // Convert client coordinates to screen coordinates
-        ClientToScreen(gti.hwndCaret, &caretPos);
+        ClientToScreen(gti.hwndCaret, &caretPos_LT);
+        ClientToScreen(gti.hwndCaret, &caretPos_RB);
+
+        int iCaretMiddleY = (caretPos_LT.y + caretPos_RB.y + 1) / 2;
         
-        if( caretPos.y > 2160*3 )
+        if( iCaretMiddleY > 2160*3 )
         { int i = 5; }
 
-        if( caretPos.y < 0 )
+        if( iCaretMiddleY < 0 )
         { int i = 5; }
 
-        return caretPos.y;
+        return iCaretMiddleY;
     }
 
     return 0;
@@ -59,7 +65,10 @@ int GetCaretPositionFromAccessibility()
 {
     long x=0,y=0,w=0,h=0;
 
-    HWND hWnd = GetForegroundWindow();
+    HWND hWnd = g_hForegroundWindow; //GetForegroundWindow();
+
+    if( !hWnd )
+        return 0;
 
     static HWND hPrevWnd     = nullptr;
     static IAccessible* pAcc = nullptr;
@@ -100,7 +109,7 @@ int GetCaretPositionFromAccessibility()
 //         }
 //     }
 
-    return (int)y;
+    return y ? (int)(y + h/2 + 1) : 0;
 }
 
 #ifdef RENDER_CURSOR
@@ -146,7 +155,9 @@ void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
 }
 #endif // RENDER_CURSOR
 
-int GetFontHeight(HWND hWnd) {
+#ifdef USE_FONT_HEIGHT
+int GetFontHeight(HWND hWnd)
+{
     HDC hdc = GetDC(hWnd);
 
     // Get the font used by the window
@@ -162,3 +173,4 @@ int GetFontHeight(HWND hWnd) {
     ReleaseDC(hWnd, hdc);
     return (int)(tm.tmHeight * g_fDpiScaleFactor + 0.5f);
 }
+#endif

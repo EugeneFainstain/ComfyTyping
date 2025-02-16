@@ -1,10 +1,14 @@
 #pragma once
 
+#define ZOOM     2
+#define PORTION 27 //16 // 1/16th of screen height
+
 #define INVALIDATE_ON_TIMER
 #define INVALIDATE_ON_HOOK
 //#define RENDER_CURSOR // It seems that we don't need this for our use case...
 //#define USE_FONT_HEIGHT
 
+//#define HAS_MENU
 
 
 #ifdef INVALIDATE_ON_TIMER

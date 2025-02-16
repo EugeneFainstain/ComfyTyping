@@ -135,11 +135,25 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
        return hWnd;
     }
 
+#if !defined(HAS_MENU)
+    SetMenu(hWnd, nullptr);
+#endif
+
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
-    // Make topmost
-    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    // Place and make topmost
+//    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    int titleBarHeight = GetSystemMetrics(SM_CYCAPTION);
+    int menuBarHeight  = GetSystemMetrics(SM_CYMENU);
+    int borderHeight   = GetSystemMetrics(SM_CYSIZEFRAME);
+    g_fDpiScaleFactor  = GetDpiScaleFactor(hWnd);
+    int height = GetSystemMetrics(SM_CYSCREEN) * ZOOM / PORTION + borderHeight*1 + (int)(titleBarHeight * g_fDpiScaleFactor);
+#ifdef HAS_MENU
+    height += menuBarHeight * g_fDpiScaleFactor;
+#endif
+    int y_pos  = GetSystemMetrics(SM_CYSCREEN) - height;
+    SetWindowPos(hWnd, HWND_TOPMOST, 0, y_pos, GetSystemMetrics(SM_CXSCREEN), height, SWP_SHOWWINDOW);
 
 #ifdef INVALIDATE_ON_HOOK
     // Start monitoring desktop for changes
@@ -218,7 +232,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
 
-                int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN) / 16; // Define the region to capture
+                int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN) / PORTION; // Define the region to capture
                 HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
                 SelectObject(hMemDC, hBitmap);
 
@@ -246,7 +260,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
                 #endif
 
-                BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
+                //BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
+                StretchBlt(hdc, 0, 0, width*ZOOM, height*ZOOM, hMemDC, 0, 0, width, height, SRCCOPY);
 
                 #ifdef RENDER_CURSOR
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works

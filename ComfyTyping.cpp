@@ -1,11 +1,12 @@
 // ComfyTyping.cpp : Defines the entry point for the application.
 //
 
-#include "framework.h"
-#include "ComfyTyping.h"
-#include <oleacc.h>  // Include for IAccessible
+#define WIN_UTILS_CPP
 
-#pragma comment(lib, "Oleacc.lib")  // Link the required library
+#include "framework.h"
+#include "ComfyTypingDefines.h" // also included in framework.h
+#include "ComfyTyping.h"
+#include "WinUtils.h"
 
 #define MAX_LOADSTRING 100
 
@@ -14,27 +15,11 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
-#define INVALIDATE_ON_TIMER
-#define INVALIDATE_ON_HOOK
-
-HWND          g_myWindowHandle = nullptr;
-HWINEVENTHOOK g_hEventHook     = nullptr;
-int           g_iCaretY        = 0;
-float         g_fScaleFactor   = 1.0f;
-
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 HWND                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
-
-#ifdef INVALIDATE_ON_TIMER
-    #define INVALIDATE_TIMER_ID       1001  // Unique timer ID
-    #define INVALIDATE_TIMER_INTERVAL 16    // 16 ms interval
-#endif
-
-#define CARET_TIMER_ID       1002   // Unique timer ID
-#define CARET_TIMER_INTERVAL 1 //16 // 16 ms interval
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -164,148 +149,6 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     return hWnd;
 }
 
-void RenderScaledCursor(HDC hTargetDC, HWND hWnd, int width, int height)
-{
-    // Get cursor info
-    CURSORINFO ci;
-    ci.cbSize = sizeof(CURSORINFO);
-    if (GetCursorInfo(&ci) && ci.flags == CURSOR_SHOWING)
-//    if (ci.hCursor == LoadCursor(NULL, IDC_IBEAM)) // or - "if not arrow, not size, etc...."
-    {
-        // Get DPI scaling factor
-        int dpi = GetDpiForWindow(hWnd);  // Windows 8.1+ (Use 96 DPI as base)
-        float scaleFactor = dpi / 96.0f;
-
-        g_fScaleFactor = scaleFactor;
-
-        // Get the cursor bitmap
-        ICONINFO iconInfo;
-        GetIconInfo(ci.hCursor, &iconInfo);
-
-        // Get original cursor size
-        BITMAP bmp;
-        GetObject(iconInfo.hbmMask, sizeof(BITMAP), &bmp);
-        int cursorWidth = bmp.bmWidth;
-        int cursorHeight = bmp.bmHeight;
-
-        // Scale the cursor size
-        int scaledWidth = (int)(cursorWidth * scaleFactor);
-        int scaledHeight = (int)(cursorHeight * scaleFactor);
-
-        // Adjust cursor position based on the hotspot
-        int hotspotX = (int)(iconInfo.xHotspot * scaleFactor);
-        int hotspotY = (int)(iconInfo.yHotspot * scaleFactor);
-
-        // Convert cursor screen position to local coordinates, accounting for the hotspot
-        POINT cursorPos = ci.ptScreenPos;
-        int drawX = cursorPos.x - hotspotX;
-        int drawY = cursorPos.y - hotspotY;
-
-        // Draw the scaled cursor
-        DrawIconEx(hTargetDC, drawX, drawY, ci.hCursor,
-                   scaledWidth, scaledHeight, 0, NULL, DI_NORMAL);
-
-        // Clean up
-        DeleteObject(iconInfo.hbmMask);
-        DeleteObject(iconInfo.hbmColor);
-    }
-}
-
-int GetCaretY()
-{
-    GUITHREADINFO gti;
-    gti.cbSize = sizeof(GUITHREADINFO);
-
-    // Get caret info from the active thread
-    if (GetGUIThreadInfo(0, &gti))
-    if (gti.hwndCaret)
-    {
-        POINT caretPos = { 0, 0 };
-
-        // Get caret position in local (client) coordinates
-        caretPos.x = gti.rcCaret.left;
-        caretPos.y = gti.rcCaret.top;
-
-        // Convert client coordinates to screen coordinates
-        ClientToScreen(gti.hwndCaret, &caretPos);
-        
-        if( caretPos.y > 2160*3 )
-        { int i = 5; }
-
-        if( caretPos.y < 0 )
-        { int i = 5; }
-
-        return caretPos.y;
-    }
-
-    return 0;
-}
-
-int GetCaretPositionFromAccessibility()
-{
-    long x=0,y=0,w=0,h=0;
-
-    HWND hWnd = GetForegroundWindow();
-
-    static HWND hPrevWnd     = nullptr;
-    static IAccessible* pAcc = nullptr;
-
-    if (hWnd != hPrevWnd)
-    {
-        if (pAcc)
-        {
-            pAcc->Release();
-            pAcc = nullptr;
-        }
-
-        if (AccessibleObjectFromWindow(hWnd, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK)
-        {
-            hPrevWnd = hWnd;
-        }
-    }
-
-    VARIANT varChild = {}; // CHILDID_SELF
-    if (pAcc)
-    {
-        // Get the caret's screen position
-        if (pAcc->accLocation(&x, &y, &w, &h, varChild) == S_OK)
-            { int i = 5; }
-        //OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
-    }
-
-//     IAccessible* pAcc = nullptr;
-//     VARIANT varChild = {}; // CHILDID_SELF
-//     if (AccessibleObjectFromWindow(hWnd, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK) {
-//         if (pAcc) {
-//             // Get the caret's screen position
-//             if (pAcc->accLocation(&x, &y, &w, &h, varChild) == S_OK) {
-//                 //std::cout << "Caret Position: X=" << caretPos.x << " Y=" << caretPos.y << std::endl;
-//                 OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
-//             }
-//             pAcc->Release();
-//         }
-//     }
-
-    return (int)y;
-}
-
-int GetFontHeight(HWND hWnd) {
-    HDC hdc = GetDC(hWnd);
-
-    // Get the font used by the window
-    HFONT hFont = (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0);
-    if (hFont) {
-        SelectObject(hdc, hFont);
-    }
-
-    // Retrieve font metrics
-    TEXTMETRIC tm;
-    GetTextMetrics(hdc, &tm);
-
-    ReleaseDC(hWnd, hdc);
-    return (int)(tm.tmHeight * g_fScaleFactor + 0.5f);
-}
-
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -369,6 +212,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
             {
+                g_fDpiScaleFactor = GetDpiScaleFactor(hWnd); // Update DPI scaling factor
+
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
 
@@ -388,11 +233,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 ReleaseDC(NULL, hScreenDC);
 
-                RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
+                #ifdef RENDER_CURSOR
+                    RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
+                #endif
 
                 BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
 
-                // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
+                #ifdef RENDER_CURSOR
+                    // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
+                #endif
+
                 DeleteObject(hBitmap);
                 DeleteDC(hMemDC);
             }

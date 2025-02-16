@@ -27,9 +27,18 @@
     <ClInclude Include="ComfyTyping.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="WinUtils.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ComfyTypingDefines.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ComfyTyping.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WinUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

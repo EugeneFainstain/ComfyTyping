@@ -128,12 +128,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ComfyTyping.h" />
+    <ClInclude Include="ComfyTypingDefines.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
+    <ClInclude Include="WinUtils.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ComfyTyping.cpp" />
+    <ClCompile Include="WinUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ComfyTyping.rc" />

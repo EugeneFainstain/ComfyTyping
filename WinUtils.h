@@ -13,15 +13,15 @@
 MYGLOBAL(HWND         , g_myWindowHandle   , nullptr);
 MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
-MYGLOBAL(int          , g_iCaretY          , 0      );
+MYGLOBAL(POINT        , g_ptCaret          , {}     );
 MYGLOBAL(float        , g_fDpiScaleFactor  , 1.0f   );
 
 
 void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);
-int GetCaretY();
-int GetCaretPositionFromAccessibility();
+POINT GetCaretPosition();
+POINT GetCaretPositionFromAccessibility();
 
 #ifdef USE_FONT_HEIGHT
     int GetFontHeight(HWND hWnd);

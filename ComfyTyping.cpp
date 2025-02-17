@@ -205,15 +205,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 #endif
         if (wParam == CARET_TIMER_ID) // Ensure it's our specific timer
         {
-            int y = GetCaretY();
+            POINT caret = GetCaretPosition();
 
-            if (y == 0)
-                y = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
+            if (caret.y == 0)
+                caret = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
 
-            if ((y < 0) || (y > GetSystemMetrics(SM_CYSCREEN)))
-                y = 0;
+            if ((caret.y < 0) || (caret.y > GetSystemMetrics(SM_CYSCREEN)))
+                caret.x = caret.y = 0;
 
-            g_iCaretY = y;
+            g_ptCaret = caret;
         }
         break;
     case WM_MOVING:
@@ -236,23 +236,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
                 SelectObject(hMemDC, hBitmap);
 
-                int iCaretY = g_iCaretY; // Calling GetCaretPositionFromAccessibility() here is too slow...
+                POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
-                if( iCaretY != 0 )
+                int iSrcX = 0;
+                int iSrcY = 0;
+
+                if( ptCaret.y != 0 )
                 {
                     #ifdef USE_FONT_HEIGHT
                         int iFontHeight = GetFontHeight(g_hForegroundWindow);
                     #endif
                     //iCaretY -= iFontHeight * 2;
-                    iCaretY -= height / 2;
-                    //iCaretY -= (int)(height - iFontHeight * g_fDpiScaleFactor / 2.0 ) / 2;
-                    //iCaretY -= (int)(height - iFontHeight * g_fDpiScaleFactor ) / 2;
-                    //iCaretY -= (int)(height - iFontHeight ) / 2;
-                    //iCaretY -= (int)(height - iFontHeight / 2 ) / 2;
+                    iSrcX = ptCaret.x / ZOOM;
+                    iSrcY = ptCaret.y - height/ 2;
                 }
 
                 // Copy from screen to memory DC
-                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, iCaretY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                // Fix later to account for ZOOM - as an optimization.
+                //BitBlt(hMemDC, 0, 0, width, height, hScreenDC, iSrcX, iSrcY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, iSrcX, iSrcY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
 
                 ReleaseDC(NULL, hScreenDC);
 
@@ -262,6 +264,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 //BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
                 StretchBlt(hdc, 0, 0, width*ZOOM, height*ZOOM, hMemDC, 0, 0, width, height, SRCCOPY);
+                //StretchBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, width/ZOOM, height/ZOOM, SRCCOPY); // ?
 
                 #ifdef RENDER_CURSOR
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works

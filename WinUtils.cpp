@@ -25,8 +25,10 @@ float GetDpiScaleFactor(HWND hWnd)
     return fDpiScaleFactor;
 }
 
-int GetCaretY()
+POINT GetCaretPosition()
 {
+    POINT retPoint  = {};
+
     GUITHREADINFO gti;
     gti.cbSize = sizeof(GUITHREADINFO);
 
@@ -47,28 +49,29 @@ int GetCaretY()
         ClientToScreen(gti.hwndCaret, &caretPos_LT);
         ClientToScreen(gti.hwndCaret, &caretPos_RB);
 
-        int iCaretMiddleY = (caretPos_LT.y + caretPos_RB.y + 1) / 2;
+        retPoint.x = (caretPos_LT.x + caretPos_RB.x + 1) / 2;
+        retPoint.y = (caretPos_LT.y + caretPos_RB.y + 1) / 2;
         
-        if( iCaretMiddleY > 2160*3 )
+        if( retPoint.y > 2160*3 )
         { int i = 5; }
 
-        if( iCaretMiddleY < 0 )
+        if( retPoint.y < 0 )
         { int i = 5; }
-
-        return iCaretMiddleY;
     }
 
-    return 0;
+    return retPoint;
 }
 
-int GetCaretPositionFromAccessibility()
+POINT GetCaretPositionFromAccessibility()
 {
     long x=0,y=0,w=0,h=0;
+    POINT retPoint  = {};
+    POINT zeroPoint = {};
 
     HWND hWnd = g_hForegroundWindow; //GetForegroundWindow();
 
     if( !hWnd )
-        return 0;
+        return retPoint;
 
     static HWND hPrevWnd     = nullptr;
     static IAccessible* pAcc = nullptr;
@@ -109,7 +112,10 @@ int GetCaretPositionFromAccessibility()
 //         }
 //     }
 
-    return y ? (int)(y + h/2 + 1) : 0;
+    retPoint.x = x + w/2;
+    retPoint.y = y + h/2;
+
+    return y ? retPoint : zeroPoint;
 }
 
 #ifdef RENDER_CURSOR

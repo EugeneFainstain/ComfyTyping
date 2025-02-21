@@ -15,6 +15,9 @@ MYGLOBAL(float        , g_fDpiScaleFactor , 1.0f   );
 MYGLOBAL(int          , g_iScreenWidth    , 100    );
 MYGLOBAL(int          , g_iScreenHeight   , 100    );
 
+MYGLOBAL(int          , g_iMyWidth        , 100    );
+MYGLOBAL(int          , g_iMyHeight       , 100    );
+
 MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
 MYGLOBAL(POINT        , g_ptCaret          , {}     );

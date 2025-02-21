@@ -151,12 +151,13 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     g_iScreenWidth     = GetSystemMetrics(SM_CXSCREEN);
     g_iScreenHeight    = GetSystemMetrics(SM_CYSCREEN);
 
-    int height = g_iScreenHeight * ZOOM / VERT_PORTION + borderHeight*1 + (int)(titleBarHeight * g_fDpiScaleFactor);
+    g_iMyWidth         = g_iScreenWidth - g_iScreenWidth / HORZ_PORTION;
+    g_iMyHeight        = g_iScreenHeight * ZOOM / VERT_PORTION + borderHeight*1 + (int)(titleBarHeight * g_fDpiScaleFactor);
 #ifdef HAS_MENU
     height += menuBarHeight * g_fDpiScaleFactor;
 #endif
-    int y_pos  = g_iScreenHeight - height;// - GetTaskbarHeight();
-    SetWindowPos(hWnd, HWND_TOPMOST, 0, y_pos, g_iScreenWidth, height, SWP_SHOWWINDOW);
+    int y_pos  = g_iScreenHeight - g_iMyHeight;// - GetTaskbarHeight();
+    SetWindowPos(hWnd, HWND_TOPMOST, (g_iScreenWidth - g_iMyWidth) / 2, y_pos, g_iMyWidth, g_iMyHeight, SWP_SHOWWINDOW);
 
 #ifdef INVALIDATE_ON_HOOK
     // Start monitoring desktop for changes
@@ -247,12 +248,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 g_fDpiScaleFactor   = GetDpiScaleFactor(hWnd); // Update DPI scaling factor
                 g_hForegroundWindow = GetForegroundWindow();
 
-                HDC hScreenDC = GetDC(NULL); // Get the desktop DC
-                HDC hMemDC = CreateCompatibleDC(hScreenDC);
-
-                int width = g_iScreenWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
-                HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-                SelectObject(hMemDC, hBitmap);
+                int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
@@ -266,42 +262,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     #endif
                     //iCaretY -= iFontHeight * 2;
 
+                    int iXPadding = g_iScreenWidth - g_iMyWidth;
+
                     //iSrcX = ptCaret.x / ZOOM;             // Cursor always matches real cursor
-                    //iSrcX = 0;                            // Cursor starts from the left edge
-                    //iSrcX = width / ZOOM;                 // Cursor starts from the right edge
+                    int iSrcX_left   = 0;                   // Cursor starts from the left edge
+                    int iSrcX_right  = g_iScreenWidth/ZOOM + iXPadding / ZOOM; // Cursor starts from the right edge
                     //iSrcX = width / ZOOM / 2;             // Cursor center matches screen center
-                    //iSrcX = ptCaret.x - width / ZOOM / 2; // Cursor always in the center of the screen
+                    int iSrcX_center = ptCaret.x - g_iMyWidth / ZOOM / 2; // Cursor always in the center of the screen
 
-                    if( ptCaret.x < width / 4 )
-                        iSrcX = 0;                            // Cursor starts from the left edge
-                    else
-                    if( ptCaret.x > width * 3 / 4 )
-                        iSrcX = width / ZOOM;                 // Cursor starts from the right edge
-                    else
-                        iSrcX = ptCaret.x - width / ZOOM / 2; // Cursor always in the center of the screen
-
+                    iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
                     iSrcY = ptCaret.y - height/ 2;
                 }
-
-                // Copy from screen to memory DC - only copy what is needed...
-                BitBlt(hMemDC, 0, 0, width/ZOOM, height, hScreenDC, iSrcX, iSrcY, SRCCOPY);
-
-                ReleaseDC(NULL, hScreenDC);
 
                 #ifdef RENDER_CURSOR
                     RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
                 #endif
 
-                //BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
-                //StretchBlt(hdc, 0, 0, width*ZOOM, height*ZOOM, hMemDC, 0, 0, width, height, SRCCOPY);
-                StretchBlt(hdc, 0, 0, width, height*ZOOM, hMemDC, 0, 0, width/ZOOM, height, SRCCOPY); // Just copying what need to be copied, not more
+                // Copy a portion of the desktop image to the window
+                {
+                    HDC hScreenDC = GetDC(NULL); // Get the desktop DC
+                    StretchBlt(hdc, 0, 0, width, height*ZOOM, hScreenDC, iSrcX, iSrcY, width/ZOOM, height, SRCCOPY);
+                    ReleaseDC(NULL, hScreenDC);
+                }
 
                 #ifdef RENDER_CURSOR
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
                 #endif
-
-                DeleteObject(hBitmap);
-                DeleteDC(hMemDC);
             }
             EndPaint(hWnd, &ps);
         }

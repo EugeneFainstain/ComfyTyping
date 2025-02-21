@@ -2,7 +2,7 @@
 
 #define ZOOM          2
 #define VERT_PORTION 27 //16 // 1/16th of screen height
-//#define HORZ_PORTION 27 
+#define HORZ_PORTION  8 // Portion of the width that is not occupied...
 
 #define INVALIDATE_ON_TIMER
 #define INVALIDATE_ON_HOOK

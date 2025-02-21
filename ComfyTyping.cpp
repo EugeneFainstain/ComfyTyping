@@ -247,14 +247,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         int iFontHeight = GetFontHeight(g_hForegroundWindow);
                     #endif
                     //iCaretY -= iFontHeight * 2;
-                    iSrcX = ptCaret.x / ZOOM;
+
+                    //iSrcX = ptCaret.x / ZOOM;             // Cursor always matches real cursor
+                    //iSrcX = 0;                            // Cursor starts from the left edge
+                    //iSrcX = width / ZOOM;                 // Cursor starts from the right edge
+                    //iSrcX = width / ZOOM / 2;             // Cursor center matches screen center
+                    //iSrcX = ptCaret.x - width / ZOOM / 2; // Cursor always in the center of the screen
+
+                    if( ptCaret.x < width / 4 )
+                        iSrcX = 0;                            // Cursor starts from the left edge
+                    else
+                    if( ptCaret.x > width * 3 / 4 )
+                        iSrcX = width / ZOOM;                 // Cursor starts from the right edge
+                    else
+                        iSrcX = ptCaret.x - width / ZOOM / 2; // Cursor always in the center of the screen
+
                     iSrcY = ptCaret.y - height/ 2;
                 }
 
-                // Copy from screen to memory DC
-                // Fix later to account for ZOOM - as an optimization.
-                //BitBlt(hMemDC, 0, 0, width, height, hScreenDC, iSrcX, iSrcY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
-                BitBlt(hMemDC, 0, 0, width, height, hScreenDC, iSrcX, iSrcY, SRCCOPY); //GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                // Copy from screen to memory DC - only copy what is needed...
+                BitBlt(hMemDC, 0, 0, width/ZOOM, height, hScreenDC, iSrcX, iSrcY, SRCCOPY);
 
                 ReleaseDC(NULL, hScreenDC);
 
@@ -263,8 +275,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 #endif
 
                 //BitBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, SRCCOPY);
-                StretchBlt(hdc, 0, 0, width*ZOOM, height*ZOOM, hMemDC, 0, 0, width, height, SRCCOPY);
-                //StretchBlt(hdc, 0, 0, width, height, hMemDC, 0, 0, width/ZOOM, height/ZOOM, SRCCOPY); // ?
+                //StretchBlt(hdc, 0, 0, width*ZOOM, height*ZOOM, hMemDC, 0, 0, width, height, SRCCOPY);
+                StretchBlt(hdc, 0, 0, width, height*ZOOM, hMemDC, 0, 0, width/ZOOM, height, SRCCOPY); // Just copying what need to be copied, not more
 
                 #ifdef RENDER_CURSOR
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works

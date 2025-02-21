@@ -1,7 +1,8 @@
 #pragma once
 
-#define ZOOM     2
-#define PORTION 27 //16 // 1/16th of screen height
+#define ZOOM          2
+#define VERT_PORTION 27 //16 // 1/16th of screen height
+//#define HORZ_PORTION 27 
 
 #define INVALIDATE_ON_TIMER
 #define INVALIDATE_ON_HOOK

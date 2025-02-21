@@ -10,12 +10,14 @@
     #define MYGLOBAL(x,y,z) extern x y
 #endif
 
-MYGLOBAL(HWND         , g_myWindowHandle   , nullptr);
+MYGLOBAL(HWND         , g_myWindowHandle  , nullptr);
+MYGLOBAL(float        , g_fDpiScaleFactor , 1.0f   );
+MYGLOBAL(int          , g_iScreenWidth    , 100    );
+MYGLOBAL(int          , g_iScreenHeight   , 100    );
+
 MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
 MYGLOBAL(POINT        , g_ptCaret          , {}     );
-MYGLOBAL(float        , g_fDpiScaleFactor  , 1.0f   );
-
 
 void OutputDebugFormatA(const char* format, ...);
 

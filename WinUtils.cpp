@@ -93,16 +93,13 @@ POINT GetCaretPositionFromAccessibility()
 
 int GetTaskbarHeight()
 {
-    // Get the screen height
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
     // Get the work area dimensions
     RECT workArea = {0};
     SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
     int workAreaHeight = workArea.bottom - workArea.top;
 
     // Calculate the taskbar height
-    int taskbarHeight = screenHeight - workAreaHeight;
+    int taskbarHeight = g_iScreenHeight - workAreaHeight;
     return taskbarHeight;
 }
 

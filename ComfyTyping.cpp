@@ -148,12 +148,15 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     int menuBarHeight  = GetSystemMetrics(SM_CYMENU);
     int borderHeight   = GetSystemMetrics(SM_CYSIZEFRAME);
     g_fDpiScaleFactor  = GetDpiScaleFactor(hWnd);
-    int height = GetSystemMetrics(SM_CYSCREEN) * ZOOM / PORTION + borderHeight*1 + (int)(titleBarHeight * g_fDpiScaleFactor);
+    g_iScreenWidth     = GetSystemMetrics(SM_CXSCREEN);
+    g_iScreenHeight    = GetSystemMetrics(SM_CYSCREEN);
+
+    int height = g_iScreenHeight * ZOOM / VERT_PORTION + borderHeight*1 + (int)(titleBarHeight * g_fDpiScaleFactor);
 #ifdef HAS_MENU
     height += menuBarHeight * g_fDpiScaleFactor;
 #endif
-    int y_pos  = GetSystemMetrics(SM_CYSCREEN) - height;// - GetTaskbarHeight();
-    SetWindowPos(hWnd, HWND_TOPMOST, 0, y_pos, GetSystemMetrics(SM_CXSCREEN), height, SWP_SHOWWINDOW);
+    int y_pos  = g_iScreenHeight - height;// - GetTaskbarHeight();
+    SetWindowPos(hWnd, HWND_TOPMOST, 0, y_pos, g_iScreenWidth, height, SWP_SHOWWINDOW);
 
 #ifdef INVALIDATE_ON_HOOK
     // Start monitoring desktop for changes
@@ -210,7 +213,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (caret.y == 0)
                 caret = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
 
-            if ((caret.y < 0) || (caret.y > GetSystemMetrics(SM_CYSCREEN)))
+            if ((caret.y < 0) || (caret.y > g_iScreenHeight))
                 caret.x = caret.y = 0;
 
             static bool bWindowAtTheBottom = false;
@@ -247,7 +250,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 HDC hScreenDC = GetDC(NULL); // Get the desktop DC
                 HDC hMemDC = CreateCompatibleDC(hScreenDC);
 
-                int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN) / PORTION; // Define the region to capture
+                int width = g_iScreenWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
                 HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
                 SelectObject(hMemDC, hBitmap);
 

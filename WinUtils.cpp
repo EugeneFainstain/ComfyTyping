@@ -65,57 +65,45 @@ POINT GetCaretPosition()
 POINT GetCaretPositionFromAccessibility()
 {
     long x=0,y=0,w=0,h=0;
-    POINT retPoint  = {};
-    POINT zeroPoint = {};
 
-    HWND hWnd = g_hForegroundWindow; //GetForegroundWindow();
-
-    if( !hWnd )
-        return retPoint;
-
-    static HWND hPrevWnd     = nullptr;
-    static IAccessible* pAcc = nullptr;
-
-    if (hWnd != hPrevWnd)
+    IAccessible* pAcc = nullptr;
+    if (AccessibleObjectFromWindow(g_hForegroundWindow, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK)
     {
         if (pAcc)
         {
+            if (pAcc->accLocation(&x, &y, &w, &h, {CHILDID_SELF} ) == S_OK) // Get the caret's screen position
+            {
+                //std::cout << "Caret Position: X=" << caretPos.x << " Y=" << caretPos.y << std::endl;
+                OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
+            }
+            else
+            {
+                int i = 5;
+            }
             pAcc->Release();
-            pAcc = nullptr;
         }
-
-        if (AccessibleObjectFromWindow(hWnd, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK)
+        else
         {
-            hPrevWnd = hWnd;
+            int i = 5;
         }
     }
 
-    VARIANT varChild = {}; // CHILDID_SELF
-    if (pAcc)
-    {
-        // Get the caret's screen position
-        if (pAcc->accLocation(&x, &y, &w, &h, varChild) == S_OK)
-            { int i = 5; }
-        //OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
-    }
+    return {x + w/2, y + h/2}; // Returning a POINT structure
+}
 
-//     IAccessible* pAcc = nullptr;
-//     VARIANT varChild = {}; // CHILDID_SELF
-//     if (AccessibleObjectFromWindow(hWnd, OBJID_CARET, IID_IAccessible, (void**)&pAcc) == S_OK) {
-//         if (pAcc) {
-//             // Get the caret's screen position
-//             if (pAcc->accLocation(&x, &y, &w, &h, varChild) == S_OK) {
-//                 //std::cout << "Caret Position: X=" << caretPos.x << " Y=" << caretPos.y << std::endl;
-//                 OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
-//             }
-//             pAcc->Release();
-//         }
-//     }
+int GetTaskbarHeight()
+{
+    // Get the screen height
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
-    retPoint.x = x + w/2;
-    retPoint.y = y + h/2;
+    // Get the work area dimensions
+    RECT workArea = {0};
+    SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
+    int workAreaHeight = workArea.bottom - workArea.top;
 
-    return y ? retPoint : zeroPoint;
+    // Calculate the taskbar height
+    int taskbarHeight = screenHeight - workAreaHeight;
+    return taskbarHeight;
 }
 
 #ifdef RENDER_CURSOR

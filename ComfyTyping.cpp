@@ -152,7 +152,7 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 #ifdef HAS_MENU
     height += menuBarHeight * g_fDpiScaleFactor;
 #endif
-    int y_pos  = GetSystemMetrics(SM_CYSCREEN) - height;
+    int y_pos  = GetSystemMetrics(SM_CYSCREEN) - height;// - GetTaskbarHeight();
     SetWindowPos(hWnd, HWND_TOPMOST, 0, y_pos, GetSystemMetrics(SM_CXSCREEN), height, SWP_SHOWWINDOW);
 
 #ifdef INVALIDATE_ON_HOOK
@@ -212,6 +212,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if ((caret.y < 0) || (caret.y > GetSystemMetrics(SM_CYSCREEN)))
                 caret.x = caret.y = 0;
+
+            static bool bWindowAtTheBottom = false;
+
+            // Make sure we are still topmost (needed to be above the taskbar)
+            if( caret.y != 0 )
+            {
+                SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                bWindowAtTheBottom = false;
+            }
+            else
+            if( !bWindowAtTheBottom )
+            {
+                SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
+                bWindowAtTheBottom = true;
+            }
 
             g_ptCaret = caret;
         }

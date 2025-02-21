@@ -22,6 +22,7 @@ void OutputDebugFormatA(const char* format, ...);
 float GetDpiScaleFactor(HWND hWnd);
 POINT GetCaretPosition();
 POINT GetCaretPositionFromAccessibility();
+int   GetTaskbarHeight();
 
 #ifdef USE_FONT_HEIGHT
     int GetFontHeight(HWND hWnd);

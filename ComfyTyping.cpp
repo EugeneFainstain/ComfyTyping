@@ -4,7 +4,7 @@
 #define WIN_UTILS_CPP
 
 #include "framework.h"
-#include "ComfyTypingDefines.h" // also included in framework.h
+#include "resource.h"
 #include "ComfyTyping.h"
 #include "WinUtils.h"
 
@@ -138,8 +138,15 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     hInst = hInstance; // Store instance handle in our global variable
 
-    HWND hWnd = CreateWindowExW(WS_EX_COMPOSITED, szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+#ifdef NO_RESIZE_NO_BORDER
+    HWND hWnd = CreateWindowExW(WS_EX_COMPOSITED, szWindowClass, szTitle, WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU, //WS_OVERLAPPEDWINDOW,
        CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+
+    EnableRoundedCorners(hWnd); // Enable rounded corners for the popup window
+#else
+    HWND hWnd = CreateWindowExW(WS_EX_COMPOSITED, szWindowClass, szTitle, WS_OVERLAPPEDWINDOW, //WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU,
+       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+#endif
 
     if (!hWnd)
     {
@@ -148,6 +155,13 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 
 #if !defined(HAS_MENU)
     SetMenu(hWnd, nullptr);
+#endif
+
+#if !defined(HAS_TITLE_BAR)
+    LONG_PTR style = GetWindowLongPtr(hWnd, GWL_STYLE); // Retrieve the current window style
+    style &= ~WS_CAPTION; // Remove the title bar (caption) from the style
+    SetWindowLongPtr(hWnd, GWL_STYLE, style); // Set the new style
+    //SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED); // Apply the style changes
 #endif
 
     ShowWindow(hWnd, nCmdShow);
@@ -163,11 +177,23 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     g_iScreenHeight    = GetSystemMetrics(SM_CYSCREEN);
 
     g_iMyWidth         = g_iScreenWidth - g_iScreenWidth / HORZ_PORTION;
-    g_iMyHeight        = g_iScreenHeight * ZOOM / VERT_PORTION + borderHeight*1 + (int)(titleBarHeight * g_fDpiScaleFactor);
+    g_iMyHeight        = g_iScreenHeight * ZOOM / VERT_PORTION;
+#if !defined(NO_RESIZE_NO_BORDER)
+    g_iMyHeight += borderHeight*4;
+#endif
 #ifdef HAS_MENU
     height += menuBarHeight * g_fDpiScaleFactor;
 #endif
-    int y_pos  = g_iScreenHeight - g_iMyHeight;// - GetTaskbarHeight();
+#ifdef HAS_TITLE_BAR
+    height += (int)(titleBarHeight * g_fDpiScaleFactor);
+#endif
+    int y_pos  = g_iScreenHeight - g_iMyHeight;
+#if !defined(POSITION_OVER_TASKBAR)
+    y_pos -= GetTaskbarHeight();
+#endif
+#if !defined(NO_RESIZE_NO_BORDER)
+    y_pos += borderHeight*2;
+#endif
     SetWindowPos(hWnd, HWND_TOPMOST, (g_iScreenWidth - g_iMyWidth) / 2, y_pos, g_iMyWidth, g_iMyHeight, SWP_SHOWWINDOW);
 
 #ifdef INVALIDATE_ON_HOOK
@@ -242,7 +268,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             else
             if( !bWindowAtTheBottom )
             {
-                SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
+                //SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
+                SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
                 bWindowAtTheBottom = true;
             }
 

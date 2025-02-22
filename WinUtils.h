@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ComfyTypingDefines.h"
+#include "ComfyTyping.h"
 #include <cstdarg>
 #include <cstdio>
 
@@ -29,6 +29,7 @@ float GetDpiScaleFactor(HWND hWnd);
 POINT GetCaretPosition();
 POINT GetCaretPositionFromAccessibility();
 int   GetTaskbarHeight();
+void  EnableRoundedCorners(HWND hwnd);
 
 #ifdef USE_FONT_HEIGHT
     int GetFontHeight(HWND hWnd);

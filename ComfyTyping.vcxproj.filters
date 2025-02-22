@@ -30,9 +30,6 @@
     <ClInclude Include="WinUtils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ComfyTypingDefines.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ComfyTyping.cpp">

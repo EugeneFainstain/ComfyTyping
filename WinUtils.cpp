@@ -1,12 +1,13 @@
 // WinUtils.cpp : helper functions for Windows programming
 //
 #include "framework.h"
-#include "ComfyTypingDefines.h"
 #include "WinUtils.h"
 
-#include <oleacc.h>  // Include for IAccessible
-
+#include <oleacc.h>  // For IAccessible
 #pragma comment(lib, "Oleacc.lib")  // Link the required library
+
+#include <dwmapi.h>  // For EnableRoundedCorners()
+#pragma comment(lib, "dwmapi.lib")
 
 void OutputDebugFormatA(const char* format, ...)
 {
@@ -165,3 +166,31 @@ int GetFontHeight(HWND hWnd)
     return (int)(tm.tmHeight * g_fDpiScaleFactor + 0.5f);
 }
 #endif
+
+void EnableRoundedCorners(HWND hwnd)
+{
+    // Define the attribute and the preference for rounded corners
+    const DWORD DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    enum DWM_WINDOW_CORNER_PREFERENCE
+    {
+        DWMWCP_DEFAULT = 0,
+        DWMWCP_DONOTROUND = 1,
+        DWMWCP_ROUND = 2,
+        DWMWCP_ROUNDSMALL = 3
+    };
+
+    DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+
+    // Apply the rounded corners preference to the window
+    HRESULT hr = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_WINDOW_CORNER_PREFERENCE,
+        &preference,
+        sizeof(preference)
+    );
+
+    if (FAILED(hr))
+    {
+        // Handle the error if needed
+    }
+}

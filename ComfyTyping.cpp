@@ -204,6 +204,10 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     return hWnd;
 }
 
+bool g_bWindowAtTheBottom = false;
+void ShowMyWindow(HWND hWnd) { SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW); g_bWindowAtTheBottom = false; }
+void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) { SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE ); g_bWindowAtTheBottom = true; } }
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -218,6 +222,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     bool bDestroy = false;
 
+    // Hiding the window on Esc, re-showing on mouse click:
+    static bool bTemporarilyDontShowMyWindow = false;
+    DO_WHEN_BECOMES_TRUE( KEY_DOWN(VK_ESCAPE), bTemporarilyDontShowMyWindow = true);
+    if( bTemporarilyDontShowMyWindow )
+        DO_WHEN_BECOMES_TRUE( KEY_DOWN(VK_LBUTTON), bTemporarilyDontShowMyWindow = false);
+
+    // Handling the messages
     switch (message)
     {
     case WM_COMMAND:
@@ -260,18 +271,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static bool bWindowAtTheBottom = false;
 
             // Make sure we are still topmost (needed to be above the taskbar)
-            if( caret.y != 0 )
-            {
-                SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                bWindowAtTheBottom = false;
-            }
+            if( (caret.y != 0) && (bTemporarilyDontShowMyWindow == false) )
+                ShowMyWindow(hWnd);
             else
-            if( !bWindowAtTheBottom )
-            {
-                //SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
-                SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
-                bWindowAtTheBottom = true;
-            }
+                HideMyWindow(hWnd);
 
             g_ptCaret = caret;
         }

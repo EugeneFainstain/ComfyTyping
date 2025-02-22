@@ -22,6 +22,10 @@
 #define CARET_TIMER_ID       1002   // Unique timer ID
 #define CARET_TIMER_INTERVAL 1      //16 // 16 ms interval
 
+#define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )
+#define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )
+#define DO_WHEN_BECOMES_TRUE(condition,action) { bool kd = (condition); static bool pr_kd = kd; if (kd && !pr_kd) { action; } pr_kd = kd; }
+
 #pragma once
 
 

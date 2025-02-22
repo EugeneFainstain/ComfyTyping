@@ -15,6 +15,9 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
+void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
+                           LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
+
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 HWND                InitInstance(HINSTANCE, int);
@@ -54,6 +57,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     SetTimer(g_myWindowHandle, CARET_TIMER_ID, CARET_TIMER_INTERVAL, NULL); // Start the timer
 
+    HWINEVENTHOOK hWinEventHook = SetWinEventHook(
+                                    EVENT_OBJECT_FOCUS,// [in] DWORD      eventMin,
+                                    EVENT_OBJECT_FOCUS,// [in] DWORD      eventMax,
+                                    NULL,              // [in] HMODULE    hmodWinEventProc,
+                                    WinEventProc_ForFocusedClientWnd,      // [in] WINEVENTPROC pfnWinEventProc,
+                                    0,                 // [in] DWORD        idProcess,
+                                    0,                 // [in] DWORD        idThread,
+                                    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS | WINEVENT_SKIPOWNTHREAD );//[in] DWORD        dwFlags
     MSG msg;
 
     // Main message loop:
@@ -209,6 +220,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 #endif
         if (wParam == CARET_TIMER_ID) // Ensure it's our specific timer
         {
+            g_hForegroundWindow = GetForegroundWindow();
+            g_fDpiScaleFactor   = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
+
             POINT caret = GetCaretPosition();
 
             if (caret.y == 0)
@@ -245,12 +259,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
             {
-                g_fDpiScaleFactor   = GetDpiScaleFactor(hWnd); // Update DPI scaling factor
-                g_hForegroundWindow = GetForegroundWindow();
-
                 int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
+
+                RECT focusedChildRect;
+                BOOL bFocusedChildRectValid = FALSE;
+
+                if( g_hFocusedChildWnd )
+                {
+                    HWND wnd = GetParent(g_hFocusedChildWnd);
+                    bFocusedChildRectValid = GetWindowRect(wnd, &focusedChildRect);
+                }
 
                 int iSrcX = 0;
                 int iSrcY = 0;
@@ -270,7 +290,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     //iSrcX = width / ZOOM / 2;             // Cursor center matches screen center
                     int iSrcX_center = ptCaret.x - g_iMyWidth / ZOOM / 2; // Cursor always in the center of the screen
 
+                    if( bFocusedChildRectValid )
+                    {
+                        iSrcX_left  = focusedChildRect.left;
+                        iSrcX_right = focusedChildRect.right/ZOOM;
+                    }
+
                     iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
+                    //iSrcX = iSrcX_left;
+                    //iSrcX = iSrcX_right;
+                    //iSrcX = iSrcX_center;
                     iSrcY = ptCaret.y - height/ 2;
                 }
 
@@ -334,4 +363,42 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     return (INT_PTR)FALSE;
+}
+
+void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
+                                              LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime)
+{
+    if( event == EVENT_OBJECT_FOCUS && idObject == OBJID_CLIENT )
+    {
+        if( g_hFocusedChildWnd != NULL)
+        {
+            // Check if this hwnd is a parent of g_hFocusedChildWnd
+            static HWND hwndPrevMatchedParent = nullptr;
+            static HWND hwndPrevMatchedParent_itsChild = nullptr;
+
+            if( hwnd == hwndPrevMatchedParent )
+            {
+                g_hFocusedChildWnd = hwndPrevMatchedParent_itsChild;
+            }
+            else
+            {
+                BOOL bIsParent = FALSE;
+                HWND hwndParent = g_hFocusedChildWnd;
+
+                while( hwndParent = GetParent(hwndParent) )
+                if( hwnd == hwndParent )
+                {
+                    bIsParent = TRUE;
+                    hwndPrevMatchedParent = hwndParent;
+                    hwndPrevMatchedParent_itsChild = g_hFocusedChildWnd;
+                    break;
+                }
+
+                if( bIsParent == FALSE )
+                    g_hFocusedChildWnd = hwnd;
+            }
+        }
+        else
+            g_hFocusedChildWnd = hwnd;
+    }
 }

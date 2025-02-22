@@ -74,7 +74,7 @@ POINT GetCaretPositionFromAccessibility()
             if (pAcc->accLocation(&x, &y, &w, &h, {CHILDID_SELF} ) == S_OK) // Get the caret's screen position
             {
                 //std::cout << "Caret Position: X=" << caretPos.x << " Y=" << caretPos.y << std::endl;
-                OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
+                //OutputDebugFormatA("Caret Position: X=%d Y=%d\n", x, y);
             }
             else
             {

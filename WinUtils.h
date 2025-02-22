@@ -19,6 +19,7 @@ MYGLOBAL(int          , g_iMyWidth        , 100    );
 MYGLOBAL(int          , g_iMyHeight       , 100    );
 
 MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
+MYGLOBAL(HWND         , g_hFocusedChildWnd , nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
 MYGLOBAL(POINT        , g_ptCaret          , {}     );
 

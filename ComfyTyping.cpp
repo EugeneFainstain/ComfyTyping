@@ -333,6 +333,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     iSrcY = ptCaret.y - height/ 2;
                 }
 
+                g_iSrcX = iSrcX;
+                g_iSrcY = iSrcY;
+
                 #ifdef RENDER_CURSOR
                     RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
                 #endif
@@ -340,7 +343,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 // Copy a portion of the desktop image to the window
                 {
                     HDC hScreenDC = GetDC(NULL); // Get the desktop DC
-                    StretchBlt(hdc, 0, 0, width, height*ZOOM, hScreenDC, iSrcX, iSrcY, width/ZOOM, height, SRCCOPY);
+                    StretchBlt(hdc, 0, 0, width, height*ZOOM, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
                     ReleaseDC(NULL, hScreenDC);
                 }
 
@@ -359,13 +362,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if( hFocusedChildWnd )
             {
-                POINT pt;
-                GetCursorPos(&pt);
+                POINT ptCurrent; GetCursorPos(&ptCurrent);
 
-                mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 32767, 32767, 0, 0);
+                POINT ptClient = ptCurrent; ScreenToClient(hWnd, &ptClient);
+
+                POINT ptTarget = { ptClient.x / ZOOM + g_iSrcX, ptClient.y / ZOOM + g_iSrcY };
+
+                POINT ptTargetAbs  = { (ptTarget.x  * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (ptTarget.y  * 65536 + g_iScreenHeight/2) / g_iScreenHeight };
+                POINT ptCurrentAbs = { (ptCurrent.x * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (ptCurrent.y * 65536 + g_iScreenHeight/2) / g_iScreenHeight };
+
+                mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ptTargetAbs.x, ptTargetAbs.y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, (pt.x * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (pt.y * 65536 + g_iScreenHeight/2) / g_iScreenHeight, 0, 0);
+                mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ptCurrentAbs.x, ptCurrentAbs.y, 0, 0);
             }
         }
         break;

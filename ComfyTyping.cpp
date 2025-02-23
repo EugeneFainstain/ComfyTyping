@@ -255,28 +255,34 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             InvalidateRect(hWnd, NULL, FALSE);
         }
 #endif
-        if (wParam == CARET_TIMER_ID) // Ensure it's our specific timer
+        if( wParam == CARET_TIMER_ID ) // Ensure it's our specific timer
+        if( g_hForegroundWindow = GetForegroundWindow() ) // g_hForegroundWindow can be NULL during focus transitions
         {
-            g_hForegroundWindow = GetForegroundWindow();
-            g_fDpiScaleFactor   = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
+            g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
 
             POINT caret = GetCaretPosition();
 
+            bool bCaretFromAccessibility = false;
             if (caret.y == 0)
+            {
                 caret = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
+                bCaretFromAccessibility = true;
+            }
+            g_bCaretFromAccessibility = bCaretFromAccessibility;
 
             if ((caret.y < 0) || (caret.y > g_iScreenHeight))
                 caret.x = caret.y = 0;
 
             static bool bWindowAtTheBottom = false;
 
-            // Make sure we are still topmost (needed to be above the taskbar)
             if( (caret.y != 0) && (bTemporarilyDontShowMyWindow == false) )
-                ShowMyWindow(hWnd);
+                ShowMyWindow(hWnd); // Make sure we are still topmost (needed to be above the taskbar)
             else
+            if( g_hForegroundWindow != hWnd ) // Don't hide our window when we click it.
                 HideMyWindow(hWnd);
 
-            g_ptCaret = caret;
+            if( g_hForegroundWindow != hWnd ) // Don't update the caret position if our window is in focus...
+                g_ptCaret = caret;
         }
         break;
     case WM_MOVING:
@@ -287,20 +293,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: Add any drawing code that uses hdc here...
+
+            if( !g_hFocusedChildWnd )
+                g_hFocusedChildWnd = g_hForegroundWindow;
+
+            if( g_hFocusedChildWnd )
             {
-                int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
+                int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to             capture
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
                 RECT focusedChildRect;
-                BOOL bFocusedChildRectValid = FALSE;
-
-                if( g_hFocusedChildWnd )
-                {
-                    HWND wnd = GetParent(g_hFocusedChildWnd);
-                    bFocusedChildRectValid = GetWindowRect(wnd, &focusedChildRect);
-                }
+                HWND hFocusedChildWnd = g_hFocusedChildWnd;
+                if( g_bCaretFromAccessibility && GetParent(hFocusedChildWnd) )
+                    hFocusedChildWnd = GetParent(hFocusedChildWnd);
+                GetWindowRect(hFocusedChildWnd, &focusedChildRect); // Should be always valid...
 
                 int iSrcX = 0;
                 int iSrcY = 0;
@@ -312,20 +319,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     #endif
                     //iCaretY -= iFontHeight * 2;
 
-                    int iXPadding = g_iScreenWidth - g_iMyWidth;
-
                     //iSrcX = ptCaret.x / ZOOM;             // Cursor always matches real cursor
-                    int iSrcX_left   = 0;                   // Cursor starts from the left edge
-                    int iSrcX_right  = g_iScreenWidth/ZOOM + iXPadding / ZOOM; // Cursor starts from the right edge
+                    int iSrcX_left   = focusedChildRect.left;                      // Cursor starts from the left edge
+                    int iSrcX_right  = focusedChildRect.right - g_iMyWidth / ZOOM; // Cursor starts from the right edge
                     //iSrcX = width / ZOOM / 2;             // Cursor center matches screen center
                     int iSrcX_center = ptCaret.x - g_iMyWidth / ZOOM / 2; // Cursor always in the center of the screen
 
-                    if( bFocusedChildRectValid )
-                    {
-                        iSrcX_left  = focusedChildRect.left;
-                        iSrcX_right = focusedChildRect.right/ZOOM;
-                    }
-
+                    // Implement the left-center-right logic
                     iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
                     //iSrcX = iSrcX_left;
                     //iSrcX = iSrcX_right;
@@ -348,7 +348,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
                 #endif
             }
+
             EndPaint(hWnd, &ps);
+        }
+        break;
+//    case WM_LBUTTONDOWN: // Can't do anything on button down - because the input focus is on our window. Improve later.
+    case WM_LBUTTONUP:
+        {
+            HWND hFocusedChildWnd = g_hFocusedChildWnd; // To make sure it doesn't change mid-way
+
+            if( hFocusedChildWnd )
+            {
+                POINT pt;
+                GetCursorPos(&pt);
+
+                mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 32767, 32767, 0, 0);
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, (pt.x * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (pt.y * 65536 + g_iScreenHeight/2) / g_iScreenHeight, 0, 0);
+            }
         }
         break;
     case WM_DESTROY:

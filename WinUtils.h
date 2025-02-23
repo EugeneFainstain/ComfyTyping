@@ -23,6 +23,8 @@ MYGLOBAL(HWND         , g_hFocusedChildWnd , nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
 MYGLOBAL(POINT        , g_ptCaret          , {}     );
 
+MYGLOBAL(bool         , g_bCaretFromAccessibility, false);
+
 void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);

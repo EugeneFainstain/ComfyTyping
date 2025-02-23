@@ -348,10 +348,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         g_bFreezeSrcXandSrcY = false;
                 }
                 else
-                {
                     g_iSrcX = iSrcX;
-                    g_iSrcY = iSrcY;
-                }
+
+                g_iSrcY = iSrcY; // Y is always updated...
 
                 #ifdef RENDER_CURSOR
                     RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC

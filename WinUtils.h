@@ -28,6 +28,10 @@ MYGLOBAL(POINT        , g_ptCaret          , {}     );
 
 MYGLOBAL(bool         , g_bCaretFromAccessibility, false);
 
+MYGLOBAL(bool         , g_bFreezeSrcXandSrcY, false   );
+MYGLOBAL(int          , g_iTakeCaretSnapshot, 0       );
+MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
+
 void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);

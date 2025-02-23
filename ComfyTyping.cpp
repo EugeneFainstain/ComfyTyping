@@ -326,15 +326,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     int iSrcX_center = ptCaret.x - g_iMyWidth / ZOOM / 2; // Cursor always in the center of the screen
 
                     // Implement the left-center-right logic
-                    iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
+                    if( iSrcX_left >= iSrcX_right ) // This happens when the window width is small enough to fit as a whole
+                        iSrcX = (iSrcX_left + iSrcX_right) / 2; //iSrcX = iSrcX_center;
+                    else
+                        iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
                     //iSrcX = iSrcX_left;
                     //iSrcX = iSrcX_right;
                     //iSrcX = iSrcX_center;
                     iSrcY = ptCaret.y - height/ 2;
                 }
 
-                g_iSrcX = iSrcX;
-                g_iSrcY = iSrcY;
+                if( g_bFreezeSrcXandSrcY || g_iTakeCaretSnapshot )
+                {
+                    if( g_iTakeCaretSnapshot )
+                    {
+                        g_ptCaretSnapshot = g_ptCaret;
+                        g_iTakeCaretSnapshot--;
+                    }
+                    else
+                    if( g_ptCaret.x != g_ptCaretSnapshot.x || g_ptCaret.y != g_ptCaretSnapshot.y )
+                        g_bFreezeSrcXandSrcY = false;
+                }
+                else
+                {
+                    g_iSrcX = iSrcX;
+                    g_iSrcY = iSrcY;
+                }
 
                 #ifdef RENDER_CURSOR
                     RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
@@ -370,6 +387,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 POINT ptTargetAbs  = { (ptTarget.x  * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (ptTarget.y  * 65536 + g_iScreenHeight/2) / g_iScreenHeight };
                 POINT ptCurrentAbs = { (ptCurrent.x * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (ptCurrent.y * 65536 + g_iScreenHeight/2) / g_iScreenHeight };
+
+                g_iTakeCaretSnapshot = 10;// At least 4 is needed here... O.o
+                g_bFreezeSrcXandSrcY = true;
 
                 mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ptTargetAbs.x, ptTargetAbs.y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);

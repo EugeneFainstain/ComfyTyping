@@ -7,6 +7,7 @@
 #include "resource.h"
 #include "ComfyTyping.h"
 #include "WinUtils.h"
+#include <iostream> // for std::isprint
 
 #define MAX_LOADSTRING 100
 
@@ -17,6 +18,8 @@ WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
 void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
                            LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
+
+LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -65,6 +68,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                                     0,                 // [in] DWORD        idProcess,
                                     0,                 // [in] DWORD        idThread,
                                     WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS | WINEVENT_SKIPOWNTHREAD );//[in] DWORD        dwFlags
+
+    HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
+
+    if( !hHook || !hWinEventHook )
+    {
+        ::MessageBoxA(0, "Error: please re-run as an Administrator.\n", "ComfyTyping", MB_ICONERROR);
+        exit(-1);
+    }
+
     MSG msg;
 
     // Main message loop:
@@ -205,13 +217,14 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     return hWnd;
 }
 
-bool g_bWindowAtTheBottom = false;
+//bool g_bWindowAtTheBottom = false;
 void MySetWindowPos(HWND hWnd, bool bShow)
      { SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, (bShow ? 1 : 4) * g_iMyWindowY, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE); }
 
-void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) MySetWindowPos(hWnd, false); g_bWindowAtTheBottom = true; }
-void ShowMyWindow(HWND hWnd) {                           MySetWindowPos(hWnd, true ); g_bWindowAtTheBottom = false; }
-
+// void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) MySetWindowPos(hWnd, false); g_bWindowAtTheBottom = true; }
+// void ShowMyWindow(HWND hWnd) {                           MySetWindowPos(hWnd, true ); g_bWindowAtTheBottom = false; }
+void HideMyWindow(HWND hWnd) { MySetWindowPos(hWnd, false); }
+void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -227,22 +240,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     bool bDestroy = false;
 
     // Hiding the window on Esc, re-showing on mouse click:
-    static bool bTemporarilyDontShowMyWindow = false;
-    DO_WHEN_BECOMES_TRUE( KEY_DOWN(VK_ESCAPE), bTemporarilyDontShowMyWindow = true);
-    if( bTemporarilyDontShowMyWindow )
-        DO_WHEN_BECOMES_TRUE( KEY_DOWN(VK_LBUTTON), bTemporarilyDontShowMyWindow = false);
+    // Note: we can probably move this logic to LowLevelKeyboardProc()...
+    DO_WHEN_BECOMES_TRUE( KEY_DOWN(VK_ESCAPE), g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow);
 
     // Handling the messages
     switch (message)
     {
     case WM_SYSCOMMAND:
-        if (wParam == SC_MINIMIZE)
+        if (wParam == SC_MINIMIZE) // Blocking the "minimize" functionality...
         {
-            if( g_bWindowAtTheBottom )
-                ShowMyWindow(hWnd); // Toggle Show/Hide instead of restore...
-            else
-                HideMyWindow(hWnd); // Toggle Show/Hide instead of minimization...
+//             if( g_bWindowAtTheBottom )
+//                 ShowMyWindow(hWnd); // Toggle Show/Hide instead of restore...
+//             else
+//                 HideMyWindow(hWnd); // Toggle Show/Hide instead of minimization...
 
+            //g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
             return (LPARAM)0; // Not calling DefWindowProc() here
         }
         break;
@@ -288,11 +300,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             static bool bWindowAtTheBottom = false;
 
-            if( (caret.y != 0) && (bTemporarilyDontShowMyWindow == false) )
+            if( ((caret.y != 0) && (g_bTemporarilyHideMyWindow == false)) || g_hForegroundWindow == hWnd )
                 ShowMyWindow(hWnd); // Make sure we are still topmost (needed to be above the taskbar)
             else
-            if( g_hForegroundWindow != hWnd ) // Don't hide our window when we click it.
-                HideMyWindow(hWnd);
+                HideMyWindow(hWnd); // This is now getting called on every WM_TIMER event... hmmm...
 
             if( g_hForegroundWindow != hWnd ) // Don't update the caret position if our window is in focus...
                 g_ptCaret = caret;
@@ -387,6 +398,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 //    case WM_LBUTTONDOWN: // Can't do anything on button down - because the input focus is on our window. Improve later.
     case WM_LBUTTONUP:
         {
+            g_bTemporarilyHideMyWindow = false;
+
             HWND hFocusedChildWnd = g_hFocusedChildWnd; // To make sure it doesn't change mid-way
 
             if( hFocusedChildWnd )
@@ -410,6 +423,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ptCurrentAbs.x, ptCurrentAbs.y, 0, 0);
             }
         }
+        break;
+    case WM_LBUTTONDOWN     :
+    //case WM_LBUTTONUP     :
+    case WM_LBUTTONDBLCLK   :
+    case WM_RBUTTONDOWN     :
+    case WM_RBUTTONUP       :
+    case WM_RBUTTONDBLCLK   :
+    case WM_MBUTTONDOWN     :
+    case WM_MBUTTONUP       :
+    case WM_MBUTTONDBLCLK   :
+        g_bTemporarilyHideMyWindow = false;
         break;
     case WM_DESTROY:
         bDestroy = true;
@@ -491,4 +515,22 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
         else
             g_hFocusedChildWnd = hwnd;
     }
+}
+
+LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    if (nCode == HC_ACTION)
+    {
+        KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *)lParam;
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
+        {
+            DWORD virtualKey    = pKeyBoard->vkCode;
+            UINT  mappedChar    = MapVirtualKey(virtualKey, MAPVK_VK_TO_CHAR); // maps the virtual key to a character
+            bool  bPrintableKey = mappedChar && std::isprint(mappedChar); // Checks if the mapped character is printable
+
+            if( bPrintableKey || virtualKey == VK_DELETE || virtualKey == VK_BACK )
+                g_bTemporarilyHideMyWindow = false;
+        }
+    }
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
 }

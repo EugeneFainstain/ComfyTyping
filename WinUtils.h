@@ -18,6 +18,9 @@ MYGLOBAL(int          , g_iScreenHeight   , 100    );
 MYGLOBAL(int          , g_iMyWidth        , 100    );
 MYGLOBAL(int          , g_iMyHeight       , 100    );
 
+MYGLOBAL(int          , g_iMyWindowX      , 100    );
+MYGLOBAL(int          , g_iMyWindowY      , 100    );
+
 MYGLOBAL(int          , g_iSrcX           , 0      );
 MYGLOBAL(int          , g_iSrcY           , 0      );
 

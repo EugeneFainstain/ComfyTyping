@@ -187,14 +187,15 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 #ifdef HAS_TITLE_BAR
     height += (int)(titleBarHeight * g_fDpiScaleFactor);
 #endif
-    int y_pos  = g_iScreenHeight - g_iMyHeight;
+    g_iMyWindowX  = (g_iScreenWidth - g_iMyWidth) / 2;
+    g_iMyWindowY  = g_iScreenHeight - g_iMyHeight;
 #if !defined(POSITION_OVER_TASKBAR)
-    y_pos -= GetTaskbarHeight();
+    g_iMyWindowY -= GetTaskbarHeight();
 #endif
 #if !defined(NO_RESIZE_NO_BORDER)
-    y_pos += borderHeight*2;
+    g_iMyWindowY += borderHeight*2;
 #endif
-    SetWindowPos(hWnd, HWND_TOPMOST, (g_iScreenWidth - g_iMyWidth) / 2, y_pos, g_iMyWidth, g_iMyHeight, SWP_SHOWWINDOW);
+    SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, g_iMyWindowY, g_iMyWidth, g_iMyHeight, SWP_SHOWWINDOW);
 
 #ifdef INVALIDATE_ON_HOOK
     // Start monitoring desktop for changes
@@ -205,8 +206,11 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 bool g_bWindowAtTheBottom = false;
-void ShowMyWindow(HWND hWnd) { SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW); g_bWindowAtTheBottom = false; }
-void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) { SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE ); g_bWindowAtTheBottom = true; } }
+void MySetWindowPos(HWND hWnd, bool bShow)
+     { SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, (bShow ? 1 : 4) * g_iMyWindowY, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE); }
+
+void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) MySetWindowPos(hWnd, false); g_bWindowAtTheBottom = true; }
+void ShowMyWindow(HWND hWnd) {                           MySetWindowPos(hWnd, true ); g_bWindowAtTheBottom = false; }
 
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
@@ -231,6 +235,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     // Handling the messages
     switch (message)
     {
+    case WM_SYSCOMMAND:
+        if (wParam == SC_MINIMIZE)
+        {
+            if( g_bWindowAtTheBottom )
+                ShowMyWindow(hWnd); // Toggle Show/Hide instead of restore...
+            else
+                HideMyWindow(hWnd); // Toggle Show/Hide instead of minimization...
+
+            return (LPARAM)0; // Not calling DefWindowProc() here
+        }
+        break;
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
@@ -243,8 +258,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case IDM_EXIT:
                 DestroyWindow(hWnd);
                 break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
             }
         }
         break;
@@ -393,6 +406,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ptTargetAbs.x, ptTargetAbs.y, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                Sleep(1); // just in case...
                 mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ptCurrentAbs.x, ptCurrentAbs.y, 0, 0);
             }
         }
@@ -400,10 +414,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:
         bDestroy = true;
         break;
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
     }
-    //////////////////////////////////////////////
+
+    // Execute the default handler
+    lParam = DefWindowProc(hWnd, message, wParam, lParam);
 
     if (bDestroy)
     {
@@ -418,7 +432,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         PostQuitMessage(0);
     }
 
-    return 0;
+    return lParam;
 }
 
 // Message handler for about box.

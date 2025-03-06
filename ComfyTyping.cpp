@@ -239,10 +239,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     bool bDestroy = false;
 
-    // Hiding the window on Esc, re-showing on mouse click:
-    // Note: we can probably move this logic to LowLevelKeyboardProc()...
-    DO_WHEN_BECOMES_TRUE( KEY_DOWN(VK_ESCAPE), g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow);
-
     // Handling the messages
     switch (message)
     {
@@ -300,7 +296,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             static bool bWindowAtTheBottom = false;
 
-            if( ((caret.y != 0) && (g_bTemporarilyHideMyWindow == false)) || g_hForegroundWindow == hWnd )
+            if( ((caret.y != 0) && (g_bTemporarilyHideMyWindow == false)) ||
+                ((g_hForegroundWindow == hWnd) && (g_bTemporarilyHideMyWindow == false)) )
                 ShowMyWindow(hWnd); // Make sure we are still topmost (needed to be above the taskbar)
             else
                 HideMyWindow(hWnd); // This is now getting called on every WM_TIMER event... hmmm...
@@ -320,6 +317,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if( !g_hFocusedChildWnd )
                 g_hFocusedChildWnd = g_hForegroundWindow;
+
+            if( g_iNewFocusedChild )
+                g_iNewFocusedChild--;
 
             if( g_hFocusedChildWnd )
             {
@@ -343,20 +343,100 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     #endif
                     //iCaretY -= iFontHeight * 2;
 
-                    //iSrcX = ptCaret.x / ZOOM;             // Cursor always matches real cursor
+                    int iSrcX_match  = ptCaret.x / ZOOM;             // Cursor always matches real cursor
                     int iSrcX_left   = focusedChildRect.left;                      // Cursor starts from the left edge
                     int iSrcX_right  = focusedChildRect.right - g_iMyWidth / ZOOM; // Cursor starts from the right edge
-                    //iSrcX = width / ZOOM / 2;             // Cursor center matches screen center
+                    //int iSrcX_match  = width / ZOOM / 2;             // Cursor center matches screen center
                     int iSrcX_center = ptCaret.x - g_iMyWidth / ZOOM / 2; // Cursor always in the center of the screen
+
+                    int iSrcX_left_edge  = ptCaret.x - 10; // Cursor always at the left edge of our window
+                    int iSrcX_right_edge = ptCaret.x - g_iMyWidth / ZOOM + 10; // Cursor always at the right edge of our window
+
+                    static int iSrcX_center_prev = iSrcX_center;
 
                     // Implement the left-center-right logic
                     if( iSrcX_left >= iSrcX_right ) // This happens when the window width is small enough to fit as a whole
                         iSrcX = (iSrcX_left + iSrcX_right) / 2; //iSrcX = iSrcX_center;
                     else
-                        iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
+                    {
+                        //iSrcX = max( iSrcX_left, min( iSrcX_right, iSrcX_center) );
+                        //iSrcX = max( iSrcX_left, min( iSrcX_right, g_iSrcX) );
+
+                        if( KEY_DOWN(VK_RSHIFT) )
+                            { int i = 5; }
+
+//                         int iOffs = iSrcX_center - iSrcX_center_prev;
+//                         iSrcX = g_iSrcX + iOffs;
+                
+                        // Note: iSrcX_right_edge < iSrcX_left_edge
+
+                        if( g_iNewFocusedChild )
+                        {
+                            int iLeftCaret   =  iSrcX_left;
+                            int iCenterCaret = (iSrcX_left + iSrcX_right) / 2 + g_iMyWidth / ZOOM / 2;
+                            int iRightCaret  =               iSrcX_right      + g_iMyWidth / ZOOM;
+                            int iFirstThird  = (iLeftCaret*2 + iRightCaret*1) / 3;
+                            int iSecondThird = (iLeftCaret*1 + iRightCaret*2) / 3;
+
+//                                 if( ptCaret.x < iFirstThird )
+//                                     g_iSrcX = iSrcX_left;//iSrcX_right_edge;
+//                                 else
+//                                 if( ptCaret.x > iSecondThird )
+//                                     g_iSrcX = iSrcX_right; //iSrcX_left_edge;
+//     //                             else
+//     //                                 g_iSrcX = (iSrcX_left + iSrcX_right) / 2;
+
+                                if( ptCaret.x < iCenterCaret )
+                                    g_iSrcX = iSrcX_left;//iSrcX_right_edge;
+                                else
+    //                            if( ptCaret.x > iSecondThird )
+                                    g_iSrcX = iSrcX_right; //iSrcX_left_edge;
+    //                             else
+    //                                 g_iSrcX = (iSrcX_left + iSrcX_right) / 2;
+
+                        }
+//                        else
+
+                        iSrcX = g_iSrcX;
+
+                        if( iSrcX < iSrcX_right_edge )
+                            iSrcX = iSrcX_right_edge;
+                        else
+                        if( iSrcX > iSrcX_left_edge )
+                            iSrcX = iSrcX_left_edge;
+                        else
+                            iSrcX = g_iSrcX;
+
+
+//                         iSrcX = g_iSrcX;
+// 
+//                         if( iSrcX < iSrcX_left )
+//                             iSrcX = iSrcX_left;
+//                         else
+//                         if( iSrcX > iSrcX_right )
+//                             iSrcX = iSrcX_right;
+//                         else
+//                             iSrcX = g_iSrcX;
+
+//                             {
+// 
+// 
+//     //                             int iOffCenter_min = iSrcX_center - iSrcX_right;
+//     //                             int iOffCenter_max = iSrcX_center - iSrcX_left;
+//     // 
+//     //                             iOffs = max( iOffCenter_min, min( iOffCenter_max, iOffCenter) );
+//     // 
+//     //                             iSrcX = g_iSrcX + iOffCenter;
+//                             }
+                    }
+
+                    iSrcX_center_prev = iSrcX_center;
+
                     //iSrcX = iSrcX_left;
                     //iSrcX = iSrcX_right;
                     //iSrcX = iSrcX_center;
+                    //iSrcX = iSrcX_match;
+                    //iSrcX = iSrcX_right_edge;
                     iSrcY = ptCaret.y - height/ 2;
                 }
 
@@ -514,6 +594,14 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
         }
         else
             g_hFocusedChildWnd = hwnd;
+
+        ///////////////////////////////////////////////////////////////
+        static HWND hPrevFocusedChildWnd = nullptr;
+        if (g_hFocusedChildWnd != hPrevFocusedChildWnd)
+        {
+            g_iNewFocusedChild   = 10;
+            hPrevFocusedChildWnd = g_hFocusedChildWnd;
+        }
     }
 }
 
@@ -528,6 +616,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             UINT  mappedChar    = MapVirtualKey(virtualKey, MAPVK_VK_TO_CHAR); // maps the virtual key to a character
             bool  bPrintableKey = mappedChar && std::isprint(mappedChar); // Checks if the mapped character is printable
 
+            if( virtualKey == VK_ESCAPE )
+                g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
+            else
             if( bPrintableKey || virtualKey == VK_DELETE || virtualKey == VK_BACK )
                 g_bTemporarilyHideMyWindow = false;
         }

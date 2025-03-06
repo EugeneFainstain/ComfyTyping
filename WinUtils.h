@@ -37,6 +37,8 @@ MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
 
 MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, false);
 
+MYGLOBAL(int          , g_iNewFocusedChild, 0);
+
 void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);

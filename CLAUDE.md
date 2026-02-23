@@ -25,7 +25,7 @@ Output binary: `x64\Release\ComfyTyping.exe`
 ### Source Layout
 
 - **ComfyTyping.cpp** — Main application: entry point (`wWinMain`), window procedure (`WndProc`), rendering via `StretchBlt`, keyboard/event hooks, window positioning logic
-- **WinUtils.cpp** — Windows API utilities: DPI scaling, caret position detection (primary via `GUITHREADINFO`, fallback via `IAccessible`), taskbar height, rounded corners
+- **WinUtils.cpp** — Windows API utilities: DPI scaling, caret position detection (three-tier: `GUITHREADINFO` → `IAccessible` → UIA `TextPattern`), taskbar height, rounded corners
 - **ComfyTyping.h** — Compile-time configuration: zoom factor, window proportions, feature flags
 - **WinUtils.h** — Global variable declarations using `MYGLOBAL` macro pattern, utility function prototypes
 
@@ -33,7 +33,12 @@ Output binary: `x64\Release\ComfyTyping.exe`
 
 **Global state**: All globals are declared in `WinUtils.h` using `MYGLOBAL(type, name, init)`. `WinUtils.cpp` defines `WIN_UTILS_CPP` before including the header so the macro expands to definitions there and `extern` declarations everywhere else.
 
-**Dual caret detection**: `GetCaretPosition()` uses `GetGUIThreadInfo` as the primary method; `GetCaretPositionFromAccessibility()` uses the `IAccessible` COM interface as a fallback when the primary method returns (0,0).
+**Three-tier caret detection**: Fallback chain in `CARET_TIMER_ID` handler:
+1. `GetCaretPosition()` — `GetGUIThreadInfo`, fast, works for most Win32 apps
+2. `GetCaretPositionFromAccessibility()` — `IAccessible` COM/MSAA, lightweight fallback
+3. `GetCaretPositionFromUIA()` — UI Automation `TextPattern2`/`TextPattern` v1, expensive last resort for Electron/Chromium apps (VSCode). Throttled to max ~2 calls/sec (500ms). Searches focused element first, then foreground window's UIA subtree. Uses multi-strategy range expansion (character-level, then line-level) to get bounding rectangles from collapsed caret ranges.
+
+Order matters for performance: IAccessible must come before UIA because UIA's `FindFirst(TreeScope_Descendants)` creates COM worker threads and can slow down apps like MSDEV.
 
 **Hooks**: Two hook mechanisms run simultaneously:
 - `LowLevelKeyboardProc` — system-wide keyboard hook that detects printable key presses (shows window) and Escape (toggles visibility)
@@ -45,11 +50,15 @@ Output binary: `x64\Release\ComfyTyping.exe`
 
 ### Compile-Time Feature Flags (ComfyTyping.h)
 
-Enabled: `INVALIDATE_ON_TIMER`, `INVALIDATE_ON_HOOK`, `NO_RESIZE_NO_BORDER`
-Disabled (commented out): `RENDER_CURSOR`, `USE_FONT_HEIGHT`, `HAS_MENU`, `HAS_TITLE_BAR`, `POSITION_OVER_TASKBAR`
+Enabled: `INVALIDATE_ON_TIMER`, `INVALIDATE_ON_HOOK`, `NO_RESIZE_NO_BORDER`, `POSITION_OVER_TASKBAR`
+Disabled (commented out): `RENDER_CURSOR`, `USE_FONT_HEIGHT`, `HAS_MENU`, `HAS_TITLE_BAR`
 
 These flags guard conditional compilation blocks throughout the codebase via `#ifdef`.
 
 ### Window Positioning
 
 The zoomed window's horizontal position follows a three-zone strategy: cursor in the left quarter of screen aligns the window left, in the right quarter aligns right, and in the middle half centers the view. The `g_bFreezeSrcXandSrcY` flag prevents view jumping when clicking on the zoomed window itself.
+
+## Communication
+
+When writing summaries, commit messages, or any text the user needs to copy-paste: the VSCode chat window renders markdown automatically, so any plain text outside a code fence gets markdown-processed (dashes become bullets, blank lines collapse, formatting breaks). **Always wrap copy-pasteable text in a \`\`\` code block** to preserve formatting exactly.

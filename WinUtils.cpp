@@ -16,6 +16,9 @@ static IUIAutomation* g_pUIAutomation = nullptr;
 
 void OutputDebugFormatA(const char* format, ...)
 {
+    if (GetKeyState(VK_CAPITAL) & 0x0001)  // CAPS LOCK on = suppress debug output
+        return;
+
     char buffer[256];
     va_list args;
     va_start(args, format);
@@ -96,28 +99,86 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
     SafeArrayGetUBound(pRects, 1, &uBound);
     LONG count = uBound - lBound + 1;
 
+    bool useRightEdge = false;
+
+    OutputDebugFormatA("UIA: GetPositionFromTextRange initial count=%d\n", count);
+
     if (count < 4)
     {
-        // Collapsed (zero-length) range — expand by 1 character and use the left edge
+        // Collapsed (zero-length) range — try expanding to get bounding rects
         SafeArrayDestroy(pRects);
         pRects = nullptr;
 
-        IUIAutomationTextRange* pExpanded = nullptr;
-        if (SUCCEEDED(pRange->Clone(&pExpanded)) && pExpanded)
+        // Strategy 1: character-level expansion (works for most UIA providers)
+        struct { TextPatternRangeEndpoint ep; TextUnit unit; int dir; const char* desc; }
+        charAttempts[] = {
+            { TextPatternRangeEndpoint_End,   TextUnit_Character,  1, "fwd char"  },
+            { TextPatternRangeEndpoint_Start, TextUnit_Character, -1, "bwd char"  },
+        };
+
+        for (int i = 0; i < _countof(charAttempts) && count < 4; i++)
         {
+            IUIAutomationTextRange* pExpanded = nullptr;
+            if (!SUCCEEDED(pRange->Clone(&pExpanded)) || !pExpanded)
+                continue;
+
             int moved = 0;
-            pExpanded->MoveEndpointByUnit(TextPatternRangeEndpoint_End,
-                                          TextUnit_Character, 1, &moved);
-            if (moved > 0)
+            HRESULT hrMove = pExpanded->MoveEndpointByUnit(charAttempts[i].ep,
+                                          charAttempts[i].unit, charAttempts[i].dir, &moved);
+            OutputDebugFormatA("UIA: %s: moved=%d hr=0x%08X\n", charAttempts[i].desc, moved, hrMove);
+
+            if ((charAttempts[i].dir > 0 && moved > 0) || (charAttempts[i].dir < 0 && moved < 0))
             {
+                if (pRects) { SafeArrayDestroy(pRects); pRects = nullptr; }
                 if (SUCCEEDED(pExpanded->GetBoundingRectangles(&pRects)) && pRects)
                 {
                     SafeArrayGetLBound(pRects, 1, &lBound);
                     SafeArrayGetUBound(pRects, 1, &uBound);
                     count = uBound - lBound + 1;
+                    OutputDebugFormatA("UIA: %s: rect count=%d\n", charAttempts[i].desc, count);
+                    if (count >= 4 && charAttempts[i].dir < 0)
+                        useRightEdge = true;
                 }
             }
             pExpanded->Release();
+        }
+
+        // Strategy 2: line-level expansion (for providers like VSCode .cpp
+        // where character-level rects don't work but line-level do)
+        if (count < 4)
+        {
+            struct { TextPatternRangeEndpoint ep; TextUnit unit; int dir; const char* desc; }
+            lineAttempts[] = {
+                { TextPatternRangeEndpoint_End,   TextUnit_Line,  1, "fwd line"  },
+                { TextPatternRangeEndpoint_Start, TextUnit_Line, -1, "bwd line"  },
+            };
+
+            for (int i = 0; i < _countof(lineAttempts) && count < 4; i++)
+            {
+                IUIAutomationTextRange* pExpanded = nullptr;
+                if (!SUCCEEDED(pRange->Clone(&pExpanded)) || !pExpanded)
+                    continue;
+
+                int moved = 0;
+                pExpanded->MoveEndpointByUnit(lineAttempts[i].ep,
+                                              lineAttempts[i].unit, lineAttempts[i].dir, &moved);
+                OutputDebugFormatA("UIA: %s: moved=%d\n", lineAttempts[i].desc, moved);
+
+                if ((lineAttempts[i].dir > 0 && moved > 0) || (lineAttempts[i].dir < 0 && moved < 0))
+                {
+                    if (pRects) { SafeArrayDestroy(pRects); pRects = nullptr; }
+                    if (SUCCEEDED(pExpanded->GetBoundingRectangles(&pRects)) && pRects)
+                    {
+                        SafeArrayGetLBound(pRects, 1, &lBound);
+                        SafeArrayGetUBound(pRects, 1, &uBound);
+                        count = uBound - lBound + 1;
+                        OutputDebugFormatA("UIA: %s: rect count=%d\n", lineAttempts[i].desc, count);
+                        if (count >= 4 && lineAttempts[i].dir < 0)
+                            useRightEdge = true;
+                    }
+                }
+                pExpanded->Release();
+            }
         }
     }
 
@@ -126,15 +187,25 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
         double* pData = nullptr;
         if (SUCCEEDED(SafeArrayAccessData(pRects, (void**)&pData)))
         {
-            // Use left edge (x) as caret position, not center of expanded char
-            result.x = (LONG)(pData[0]);
-            result.y = (LONG)(pData[1] + pData[3] / 2);
-            OutputDebugFormatA("UIA: caret at %d, %d (rect: %.0f,%.0f,%.0f,%.0f)\n",
-                               result.x, result.y, pData[0], pData[1], pData[2], pData[3]);
+            // Use last rect when right-edge (line-to-caret range may have multiple rects)
+            int rectIdx = useRightEdge ? (count / 4 - 1) * 4 : 0;
+            double x = pData[rectIdx], y = pData[rectIdx+1], w = pData[rectIdx+2], h = pData[rectIdx+3];
+
+            if (useRightEdge)
+                result.x = (LONG)(x + w);   // Right edge = caret X position
+            else
+                result.x = (LONG)(x);       // Left edge of next char
+
+            result.y = (LONG)(y + h / 2);
+            OutputDebugFormatA("UIA: caret at %d, %d (rect[%d]: %.0f,%.0f,%.0f,%.0f)%s\n",
+                               result.x, result.y, rectIdx/4, x, y, w, h,
+                               useRightEdge ? " [right edge]" : "");
             SafeArrayUnaccessData(pRects);
             found = true;
         }
     }
+    if (!found)
+        OutputDebugFormatA("UIA: GetPositionFromTextRange FAILED (final count=%d)\n", count);
     if (pRects) SafeArrayDestroy(pRects);
     return found;
 }
@@ -180,6 +251,16 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
                 IUIAutomationTextRange* pRange = nullptr;
                 if (SUCCEEDED(pSelections->GetElement(0, &pRange)) && pRange)
                 {
+                    // Log the text content of the range (first 50 chars)
+                    BSTR rangeText = nullptr;
+                    if (SUCCEEDED(pRange->GetText(50, &rangeText)))
+                    {
+                        OutputDebugFormatA("UIA: selection range text: '%S' (len=%d)\n",
+                                           rangeText ? rangeText : L"(null)",
+                                           rangeText ? SysStringLen(rangeText) : 0);
+                        if (rangeText) SysFreeString(rangeText);
+                    }
+
                     // Check what GetBoundingRectangles gives us
                     SAFEARRAY* pRects = nullptr;
                     hr = pRange->GetBoundingRectangles(&pRects);
@@ -207,6 +288,47 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
         {
             OutputDebugFormatA("UIA: TextPattern v1 GetSelection failed hr=0x%08X\n", hr);
         }
+        if (!found)
+        {
+            // Diagnostic: check if GetVisibleRanges produces bounding rects
+            IUIAutomationTextRangeArray* pVisible = nullptr;
+            if (SUCCEEDED(pTextPattern->GetVisibleRanges(&pVisible)) && pVisible)
+            {
+                int visCount = 0;
+                pVisible->get_Length(&visCount);
+                OutputDebugFormatA("UIA: GetVisibleRanges returned %d ranges\n", visCount);
+                if (visCount > 0)
+                {
+                    IUIAutomationTextRange* pVisRange = nullptr;
+                    if (SUCCEEDED(pVisible->GetElement(0, &pVisRange)) && pVisRange)
+                    {
+                        SAFEARRAY* pVisRects = nullptr;
+                        if (SUCCEEDED(pVisRange->GetBoundingRectangles(&pVisRects)) && pVisRects)
+                        {
+                            LONG lb, ub;
+                            SafeArrayGetLBound(pVisRects, 1, &lb);
+                            SafeArrayGetUBound(pVisRects, 1, &ub);
+                            LONG vc = ub - lb + 1;
+                            OutputDebugFormatA("UIA: visible range[0] bounding rect elements: %d\n", vc);
+                            if (vc >= 4)
+                            {
+                                double* pData = nullptr;
+                                if (SUCCEEDED(SafeArrayAccessData(pVisRects, (void**)&pData)))
+                                {
+                                    OutputDebugFormatA("UIA: visible range[0] rect: %.0f,%.0f,%.0f,%.0f\n",
+                                                       pData[0], pData[1], pData[2], pData[3]);
+                                    SafeArrayUnaccessData(pVisRects);
+                                }
+                            }
+                            SafeArrayDestroy(pVisRects);
+                        }
+                        pVisRange->Release();
+                    }
+                }
+                pVisible->Release();
+            }
+        }
+
         pTextPattern->Release();
         if (found)
         {
@@ -225,6 +347,15 @@ POINT GetCaretPositionFromUIA()
     if (!g_pUIAutomation)
         return result;
 
+    // Throttle: UIA calls are expensive (especially FindFirst on large trees)
+    // COM/UIA creates worker threads on each call — must limit aggressively
+    static DWORD lastCallTime = 0;
+    static POINT cachedResult = {};
+    DWORD now = GetTickCount();
+    if (now - lastCallTime < 500)  // Max ~2 calls/sec
+        return cachedResult;
+    lastCallTime = now;
+
     // 1. Try the focused element directly
     IUIAutomationElement* pFocused = nullptr;
     if (SUCCEEDED(g_pUIAutomation->GetFocusedElement(&pFocused)) && pFocused)
@@ -240,6 +371,7 @@ POINT GetCaretPositionFromUIA()
         if (TryGetCaretFromElement(pFocused, result))
         {
             pFocused->Release();
+            cachedResult = result;
             return result;
         }
         pFocused->Release();
@@ -287,6 +419,7 @@ POINT GetCaretPositionFromUIA()
     }
 
     pWindow->Release();
+    cachedResult = result;
     return result;
 }
 

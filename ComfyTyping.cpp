@@ -284,19 +284,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
 
-            POINT caret = GetCaretPosition();
-
+            POINT caret = {};
             bool bCaretFromAccessibility = false;
+
+            OutputDebugFormatA("========================================\n");
+
+            // 1. Primary: Win32 GetGUIThreadInfo (fast, works for most apps)
+            caret = GetCaretPosition();
+
+            // 2. Fallback: IAccessible/MSAA (lightweight, works for MSDEV etc.)
             if (caret.y == 0)
             {
+                caret = GetCaretPositionFromAccessibility();
+                bCaretFromAccessibility = true;
+            }
+
+            // 3. Last resort: UIA (expensive, needed for Electron/Chromium apps)
+            if (caret.y == 0)
+            {
+                OutputDebugFormatA("Primary+MSAA failed, trying UIA...\n");
                 caret = GetCaretPositionFromUIA();
-                bCaretFromAccessibility = true;
             }
-            if (caret.y == 0)
-            {
-                caret = GetCaretPositionFromAccessibility(); // MSAA fallback
-                bCaretFromAccessibility = true;
-            }
+
             g_bCaretFromAccessibility = bCaretFromAccessibility;
 
             if ((caret.y < 0) || (caret.y > g_iScreenHeight))

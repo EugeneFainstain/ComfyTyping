@@ -305,23 +305,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             POINT caret = {};
             bool bCaretFromAccessibility = false;
+            int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
 
             OutputDebugFormatA("========================================\n");
 
-            // 1. Primary: Win32 GetGUIThreadInfo (fast, works for most apps)
-            caret = GetCaretPosition();
+            // Detection chain — only try methods enabled for this app
+            if (methods & CARET_METHOD_GUITHREADINFO)
+                caret = GetCaretPosition();
 
-            // 2. Fallback: IAccessible/MSAA (lightweight, works for MSDEV etc.)
-            if (caret.y == 0)
+            if (caret.y == 0 && (methods & CARET_METHOD_IACCESSIBLE))
             {
                 caret = GetCaretPositionFromAccessibility();
                 bCaretFromAccessibility = true;
             }
 
-            // 3. Last resort: UIA (expensive, needed for Electron/Chromium apps)
-            if (caret.y == 0)
+            if (caret.y == 0 && (methods & CARET_METHOD_UIA))
             {
-                OutputDebugFormatA("Primary+MSAA failed, trying UIA...\n");
+                OutputDebugFormatA("Trying UIA...\n");
                 caret = GetCaretPositionFromUIA();
             }
 

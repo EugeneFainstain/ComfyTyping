@@ -39,6 +39,12 @@ MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, false);
 
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 
+// Caret detection method flags (combinable)
+#define CARET_METHOD_GUITHREADINFO   0x01  // GetGUIThreadInfo (fast Win32)
+#define CARET_METHOD_IACCESSIBLE     0x02  // IAccessible/MSAA
+#define CARET_METHOD_UIA             0x04  // UI Automation TextPattern
+#define CARET_METHOD_ALL (CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE | CARET_METHOD_UIA)
+
 void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);
@@ -48,6 +54,7 @@ void  CleanupUIAutomation();
 POINT GetCaretPositionFromUIA();
 POINT GetCaretPositionFromAccessibility();
 int   GetTaskbarHeight();
+int   GetCaretMethodsForWindow(HWND hwnd);
 void  EnableRoundedCorners(HWND hwnd);
 
 #ifdef USE_FONT_HEIGHT

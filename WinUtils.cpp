@@ -12,7 +12,58 @@
 #include <dwmapi.h>  // For EnableRoundedCorners()
 #pragma comment(lib, "dwmapi.lib")
 
+#include <psapi.h>   // For GetModuleFileNameExA
+
 static IUIAutomation* g_pUIAutomation = nullptr;
+
+// ---------------------------------------------------------------------------
+// Per-app caret detection config lookup
+// ---------------------------------------------------------------------------
+int GetCaretMethodsForWindow(HWND hwnd)
+{
+#ifdef USE_PER_APP_CARET_CONFIG
+    static HWND  cachedHwnd = nullptr;
+    static int   cachedMethods = CARET_METHOD_ALL;
+
+    if (hwnd == cachedHwnd)
+        return cachedMethods;
+
+    cachedHwnd = hwnd;
+    cachedMethods = CARET_METHOD_ALL; // default for unknown apps
+
+    // Get the exe name of the process that owns this window
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid)
+        return cachedMethods;
+
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc)
+        return cachedMethods;
+
+    char fullPath[MAX_PATH] = {};
+    DWORD pathLen = MAX_PATH;
+    QueryFullProcessImageNameA(hProc, 0, fullPath, &pathLen);
+    CloseHandle(hProc);
+
+    // Extract filename after last backslash, lowercase it
+    char exeName[MAX_PATH] = {};
+    const char* lastSlash = strrchr(fullPath, '\\');
+    const char* name = lastSlash ? lastSlash + 1 : fullPath;
+    for (int i = 0; name[i] && i < MAX_PATH - 1; i++)
+        exeName[i] = (char)tolower((unsigned char)name[i]);
+
+    // Match against config table
+    #define APP_ENTRY(exe, methods) if (strcmp(exeName, exe) == 0) { cachedMethods = methods; return cachedMethods; }
+    APP_CONFIG_TABLE
+    #undef APP_ENTRY
+
+    OutputDebugFormatA("App '%s': no config, using all methods\n", exeName);
+    return cachedMethods;
+#else
+    return CARET_METHOD_ALL;
+#endif
+}
 
 void OutputDebugFormatA(const char* format, ...)
 {
@@ -251,33 +302,6 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
                 IUIAutomationTextRange* pRange = nullptr;
                 if (SUCCEEDED(pSelections->GetElement(0, &pRange)) && pRange)
                 {
-                    // Log the text content of the range (first 50 chars)
-                    BSTR rangeText = nullptr;
-                    if (SUCCEEDED(pRange->GetText(50, &rangeText)))
-                    {
-                        OutputDebugFormatA("UIA: selection range text: '%S' (len=%d)\n",
-                                           rangeText ? rangeText : L"(null)",
-                                           rangeText ? SysStringLen(rangeText) : 0);
-                        if (rangeText) SysFreeString(rangeText);
-                    }
-
-                    // Check what GetBoundingRectangles gives us
-                    SAFEARRAY* pRects = nullptr;
-                    hr = pRange->GetBoundingRectangles(&pRects);
-                    if (SUCCEEDED(hr) && pRects)
-                    {
-                        LONG lBound, uBound;
-                        SafeArrayGetLBound(pRects, 1, &lBound);
-                        SafeArrayGetUBound(pRects, 1, &uBound);
-                        LONG count = uBound - lBound + 1;
-                        OutputDebugFormatA("UIA: TextPattern v1 bounding rect elements: %d\n", count);
-                        SafeArrayDestroy(pRects);
-                    }
-                    else
-                    {
-                        OutputDebugFormatA("UIA: TextPattern v1 GetBoundingRectangles failed hr=0x%08X\n", hr);
-                    }
-
                     found = GetPositionFromTextRange(pRange, result);
                     pRange->Release();
                 }
@@ -287,46 +311,6 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
         else
         {
             OutputDebugFormatA("UIA: TextPattern v1 GetSelection failed hr=0x%08X\n", hr);
-        }
-        if (!found)
-        {
-            // Diagnostic: check if GetVisibleRanges produces bounding rects
-            IUIAutomationTextRangeArray* pVisible = nullptr;
-            if (SUCCEEDED(pTextPattern->GetVisibleRanges(&pVisible)) && pVisible)
-            {
-                int visCount = 0;
-                pVisible->get_Length(&visCount);
-                OutputDebugFormatA("UIA: GetVisibleRanges returned %d ranges\n", visCount);
-                if (visCount > 0)
-                {
-                    IUIAutomationTextRange* pVisRange = nullptr;
-                    if (SUCCEEDED(pVisible->GetElement(0, &pVisRange)) && pVisRange)
-                    {
-                        SAFEARRAY* pVisRects = nullptr;
-                        if (SUCCEEDED(pVisRange->GetBoundingRectangles(&pVisRects)) && pVisRects)
-                        {
-                            LONG lb, ub;
-                            SafeArrayGetLBound(pVisRects, 1, &lb);
-                            SafeArrayGetUBound(pVisRects, 1, &ub);
-                            LONG vc = ub - lb + 1;
-                            OutputDebugFormatA("UIA: visible range[0] bounding rect elements: %d\n", vc);
-                            if (vc >= 4)
-                            {
-                                double* pData = nullptr;
-                                if (SUCCEEDED(SafeArrayAccessData(pVisRects, (void**)&pData)))
-                                {
-                                    OutputDebugFormatA("UIA: visible range[0] rect: %.0f,%.0f,%.0f,%.0f\n",
-                                                       pData[0], pData[1], pData[2], pData[3]);
-                                    SafeArrayUnaccessData(pVisRects);
-                                }
-                            }
-                            SafeArrayDestroy(pVisRects);
-                        }
-                        pVisRange->Release();
-                    }
-                }
-                pVisible->Release();
-            }
         }
 
         pTextPattern->Release();
@@ -352,7 +336,7 @@ POINT GetCaretPositionFromUIA()
     static DWORD lastCallTime = 0;
     static POINT cachedResult = {};
     DWORD now = GetTickCount();
-    if (now - lastCallTime < 500)  // Max ~2 calls/sec
+    if (now - lastCallTime < 100)  // Max ~10 calls/sec
         return cachedResult;
     lastCallTime = now;
 

@@ -26,6 +26,31 @@
 #define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )
 #define DO_WHEN_BECOMES_TRUE(condition,action) { bool kd = (condition); static bool pr_kd = kd; if (kd && !pr_kd) { action; } pr_kd = kd; }
 
-#pragma once
+// ---------------------------------------------------------------------------
+// Per-app caret detection configuration
+// ---------------------------------------------------------------------------
+// Comment out USE_PER_APP_CARET_CONFIG to use the full fallback chain for all
+// apps (useful for testing compatibility with unknown apps).
+#define USE_PER_APP_CARET_CONFIG
 
+#ifdef USE_PER_APP_CARET_CONFIG
+// Per-app detection methods. Exe names are lowercase, matched against the
+// foreground window's process. Methods are tried in the fixed order:
+//    GetGUIThreadInfo -> IAccessible -> UIA
+// but only those whose flag is set for the matched app.
+// Unknown apps get CARET_METHOD_ALL (full fallback chain).
+//
+// Flags: CARET_METHOD_GUITHREADINFO (0x01)
+//        CARET_METHOD_IACCESSIBLE   (0x02)
+//        CARET_METHOD_UIA           (0x04)
+//        CARET_METHOD_ALL           (0x07)
+//
+#define APP_CONFIG_TABLE \
+    APP_ENTRY("devenv.exe",          CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE) \
+    APP_ENTRY("code.exe",            CARET_METHOD_UIA) \
+    APP_ENTRY("cmd.exe",             CARET_METHOD_UIA) \
+    APP_ENTRY("notepad++.exe",       CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE) \
+    APP_ENTRY("windowsterminal.exe", CARET_METHOD_UIA) \
+    /* Add more apps here */
+#endif
 

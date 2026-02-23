@@ -22,6 +22,25 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 
+// Dedicated thread for the low-level keyboard hook so UIA calls on the
+// main thread can't block keyboard delivery to other apps.
+static DWORD WINAPI KeyboardHookThreadProc(LPVOID lpParam)
+{
+    HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, (HINSTANCE)lpParam, 0);
+    if (!hHook)
+        return 1;
+
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    UnhookWindowsHookEx(hHook);
+    return 0;
+}
+
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 HWND                InitInstance(HINSTANCE, int);
@@ -70,9 +89,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                                     0,                 // [in] DWORD        idThread,
                                     WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS | WINEVENT_SKIPOWNTHREAD );//[in] DWORD        dwFlags
 
-    HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
+    HANDLE hHookThread = CreateThread(nullptr, 0, KeyboardHookThreadProc, hInstance, 0, nullptr);
 
-    if( !hHook || !hWinEventHook )
+    if( !hHookThread || !hWinEventHook )
     {
         ::MessageBoxA(0, "Error: please re-run as an Administrator.\n", "ComfyTyping", MB_ICONERROR);
         exit(-1);

@@ -43,6 +43,9 @@ void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);
 POINT GetCaretPosition();
+void  InitUIAutomation();
+void  CleanupUIAutomation();
+POINT GetCaretPositionFromUIA();
 POINT GetCaretPositionFromAccessibility();
 int   GetTaskbarHeight();
 void  EnableRoundedCorners(HWND hwnd);

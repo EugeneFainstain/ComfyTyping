@@ -7,7 +7,8 @@
 #include "resource.h"
 #include "ComfyTyping.h"
 #include "WinUtils.h"
-#include <iostream> // for std::isprint
+#include <iostream>  // for std::isprint
+#include <objbase.h> // for CoInitializeEx / CoUninitialize
 
 #define MAX_LOADSTRING 100
 
@@ -36,8 +37,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(lpCmdLine);
 
     SetProcessDPIAware();  // Enable DPI awareness (Windows 7+)
-
-    // TODO: Place code here.
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    InitUIAutomation();
 
     // Initialize global strings
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
@@ -89,6 +90,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
     }
 
+    CleanupUIAutomation();
+    CoUninitialize();
     return (int) msg.wParam;
 }
 
@@ -286,7 +289,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             bool bCaretFromAccessibility = false;
             if (caret.y == 0)
             {
-                caret = GetCaretPositionFromAccessibility(); // this is too slow to be executed on WM_PAINT...
+                caret = GetCaretPositionFromUIA();
+                bCaretFromAccessibility = true;
+            }
+            if (caret.y == 0)
+            {
+                caret = GetCaretPositionFromAccessibility(); // MSAA fallback
                 bCaretFromAccessibility = true;
             }
             g_bCaretFromAccessibility = bCaretFromAccessibility;

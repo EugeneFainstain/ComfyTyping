@@ -304,6 +304,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
 
             POINT caret = {};
+            HWND  hwndCaretOwner = nullptr;  // filled by GetCaretPosition (gti.hwndCaret)
             bool bCaretFromAccessibility = false;
             int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
 
@@ -311,12 +312,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // Detection chain — only try methods enabled for this app
             if (methods & CARET_METHOD_GUITHREADINFO)
-                caret = GetCaretPosition();
+                caret = GetCaretPosition(&hwndCaretOwner);
 
             if (caret.y == 0 && (methods & CARET_METHOD_IACCESSIBLE))
             {
-                caret = GetCaretPositionFromAccessibility();
+                HWND hwndAccCaret = nullptr;
+                caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
                 bCaretFromAccessibility = true;
+                // IAccessible's WindowFromAccessibleObject can give us the
+                // editor window directly — use it if gti.hwndCaret was empty
+                if (!hwndCaretOwner && hwndAccCaret)
+                    hwndCaretOwner = hwndAccCaret;
             }
 
             if (caret.y == 0 && (methods & CARET_METHOD_UIA))
@@ -326,6 +332,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
 
             g_bCaretFromAccessibility = bCaretFromAccessibility;
+
+            // Log the focused child window
+            {
+                char cls[64] = {};
+                RECT rc = {};
+                if (g_hFocusedChildWnd) { GetClassNameA(g_hFocusedChildWnd, cls, sizeof(cls)); GetWindowRect(g_hFocusedChildWnd, &rc); }
+                OutputDebugFormatA("ChildWnd: %p '%s' (%d,%d,%d,%d)\n",
+                                    g_hFocusedChildWnd, cls, rc.left, rc.top, rc.right, rc.bottom);
+            }
 
             if ((caret.y < 0) || (caret.y > g_iScreenHeight))
                 caret.x = caret.y = 0;
@@ -351,22 +366,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
 
-            if( !g_hFocusedChildWnd )
-                g_hFocusedChildWnd = g_hForegroundWindow;
+            HWND hFocusedChildWnd = g_hFocusedChildWnd;
+
+            if( !hFocusedChildWnd )
+                hFocusedChildWnd = g_hForegroundWindow;
 
             if( g_iNewFocusedChild )
                 g_iNewFocusedChild--;
 
-            if( g_hFocusedChildWnd )
+            if( hFocusedChildWnd )
             {
                 int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to             capture
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
                 RECT focusedChildRect;
-                HWND hFocusedChildWnd = g_hFocusedChildWnd;
-                if( g_bCaretFromAccessibility && GetParent(hFocusedChildWnd) )
-                    hFocusedChildWnd = GetParent(hFocusedChildWnd);
                 GetWindowRect(hFocusedChildWnd, &focusedChildRect); // Should be always valid...
 
                 int iSrcX = 0;
@@ -406,7 +420,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 
                         // Note: iSrcX_right_edge < iSrcX_left_edge
 
-                        if( g_iNewFocusedChild )
                         {
                             int iLeftCaret   =  iSrcX_left;
                             int iCenterCaret = (iSrcX_left + iSrcX_right) / 2 + g_iMyWidth / ZOOM / 2;
@@ -516,7 +529,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             g_bTemporarilyHideMyWindow = false;
 
-            HWND hFocusedChildWnd = g_hFocusedChildWnd; // To make sure it doesn't change mid-way
+            HWND hFocusedChildWnd = g_hFocusedChildWnd; // Snapshot so it doesn't change mid-way
 
             if( hFocusedChildWnd )
             {
@@ -600,6 +613,14 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
 {
     if( event == EVENT_OBJECT_FOCUS && idObject == OBJID_CLIENT )
     {
+        // Log for diagnostics
+        char cls[64] = {};
+        GetClassNameA(hwnd, cls, sizeof(cls));
+        RECT rc;
+        GetWindowRect(hwnd, &rc);
+        OutputDebugFormatA("FocusEvent: hwnd=%p class='%s' rect=(%d,%d,%d,%d)\n",
+                           hwnd, cls, rc.left, rc.top, rc.right, rc.bottom);
+
         if( g_hFocusedChildWnd != NULL)
         {
             // Check if this hwnd is a parent of g_hFocusedChildWnd

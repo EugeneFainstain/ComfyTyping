@@ -12,8 +12,6 @@
 #include <dwmapi.h>  // For EnableRoundedCorners()
 #pragma comment(lib, "dwmapi.lib")
 
-#include <psapi.h>   // For GetModuleFileNameExA
-
 static IUIAutomation* g_pUIAutomation = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -85,7 +83,7 @@ float GetDpiScaleFactor(HWND hWnd)
     return fDpiScaleFactor;
 }
 
-POINT GetCaretPosition()
+POINT GetCaretPosition(HWND* pCaretWnd)
 {
     POINT retPoint  = {};
 
@@ -111,7 +109,19 @@ POINT GetCaretPosition()
 
         retPoint.x = (caretPos_LT.x + caretPos_RB.x + 1) / 2;
         retPoint.y = (caretPos_LT.y + caretPos_RB.y + 1) / 2;
-        
+
+        // Return the caret-owning HWND to the caller
+        if (pCaretWnd)
+            *pCaretWnd = gti.hwndCaret;
+
+        // Log the caret window info
+        RECT rc;
+        GetWindowRect(gti.hwndCaret, &rc);
+        char cls[64] = {};
+        GetClassNameA(gti.hwndCaret, cls, sizeof(cls));
+        OutputDebugFormatA("gti.hwndCaret: hwnd=%p class='%s' rect=(%d,%d,%d,%d)\n",
+                           gti.hwndCaret, cls, rc.left, rc.top, rc.right, rc.bottom);
+
         if( retPoint.y > 2160*3 )
         { int i = 5; }
 
@@ -407,7 +417,7 @@ POINT GetCaretPositionFromUIA()
     return result;
 }
 
-POINT GetCaretPositionFromAccessibility()
+POINT GetCaretPositionFromAccessibility(HWND* pCaretWnd)
 {
     long x=0,y=0,w=0,h=0;
 
@@ -417,6 +427,24 @@ POINT GetCaretPositionFromAccessibility()
         if (pAcc)
         {
             pAcc->accLocation(&x, &y, &w, &h, {CHILDID_SELF} );
+
+            // Ask IAccessible which HWND owns this caret
+            if (pCaretWnd)
+            {
+                HWND hwnd = nullptr;
+                WindowFromAccessibleObject(pAcc, &hwnd);
+                *pCaretWnd = hwnd;
+                if (hwnd)
+                {
+                    RECT rc;
+                    GetWindowRect(hwnd, &rc);
+                    char cls[64] = {};
+                    GetClassNameA(hwnd, cls, sizeof(cls));
+                    OutputDebugFormatA("IAccessible caret window: hwnd=%p class='%s' rect=(%d,%d,%d,%d)\n",
+                                       hwnd, cls, rc.left, rc.top, rc.right, rc.bottom);
+                }
+            }
+
             pAcc->Release();
         }
     }

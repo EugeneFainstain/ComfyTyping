@@ -25,6 +25,7 @@ MYGLOBAL(int          , g_iSrcX           , 0      );
 MYGLOBAL(int          , g_iSrcY           , 0      );
 
 MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
+
 MYGLOBAL(HWND         , g_hFocusedChildWnd , nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
 MYGLOBAL(POINT        , g_ptCaret          , {}     );
@@ -48,11 +49,11 @@ MYGLOBAL(int          , g_iNewFocusedChild, 0);
 void OutputDebugFormatA(const char* format, ...);
 
 float GetDpiScaleFactor(HWND hWnd);
-POINT GetCaretPosition();
+POINT GetCaretPosition(HWND* pCaretWnd = nullptr);
 void  InitUIAutomation();
 void  CleanupUIAutomation();
 POINT GetCaretPositionFromUIA();
-POINT GetCaretPositionFromAccessibility();
+POINT GetCaretPositionFromAccessibility(HWND* pCaretWnd = nullptr);
 int   GetTaskbarHeight();
 int   GetCaretMethodsForWindow(HWND hwnd);
 void  EnableRoundedCorners(HWND hwnd);

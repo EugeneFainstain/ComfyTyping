@@ -51,7 +51,7 @@ MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to dete
     extern char g_szAppExeName[64];
 #endif
 
-// Detection method flags — all share one bitmask per app.
+// Detection method flags - all share one bitmask per app.
 // Caret methods (tried in order: GuiThreadInfo -> IAccessible -> UIA)
 #define CARET_GTHI      0x001
 #define CARET_IACC      0x002

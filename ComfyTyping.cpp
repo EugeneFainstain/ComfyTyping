@@ -736,7 +736,7 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
     {
         g_bCaretMightHaveMoved = true;
 
-        // Don't accept the foreground window itself as a focused child —
+        // Don't accept the foreground window itself as a focused child -
         // the paint handler already falls back to it when child is null.
         if (hwnd == g_hForegroundWindow)
             return;

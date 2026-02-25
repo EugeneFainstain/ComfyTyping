@@ -40,6 +40,8 @@ struct AppConfig
 static const AppConfig g_appConfigTable[] = {
     { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
     { "code.exe", 0xFF },
+//    { "code.exe", 0xFF & (~CONTAINER_HOOK) & (~CONTAINER_ENUM) },
+//    { "code.exe", 0x0F | CONTAINER_UIA },
     { "cmd.exe",                                       CARET_UIA |                                   CONTAINER_UIA },
     { "notepad++.exe",       CARET_GTHI | CARET_IACC             | CONTAINER_HOOK | CONTAINER_ENUM                 },
     { "windowsterminal.exe",                           CARET_UIA |                                   CONTAINER_UIA },
@@ -103,7 +105,7 @@ static int GetMethodsForWindow(HWND hwnd)
 #endif
 
 // ---------------------------------------------------------------------------
-// Public accessors — extract caret or container bits from the combined mask
+// Public accessors - extract caret or container bits from the combined mask
 // ---------------------------------------------------------------------------
 int GetCaretMethodsForWindow(HWND hwnd)
 {
@@ -227,7 +229,7 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
 
     if (count < 4)
     {
-        // Collapsed (zero-length) range — try expanding to get bounding rects
+        // Collapsed (zero-length) range - try expanding to get bounding rects
         SafeArrayDestroy(pRects);
         pRects = nullptr;
 
@@ -332,7 +334,7 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
     return found;
 }
 
-// Try to get caret position from a UIA element — tries TextPattern2 then TextPattern
+// Try to get caret position from a UIA element - tries TextPattern2 then TextPattern
 static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result)
 {
     // Try TextPattern2::GetCaretRange first (best method)
@@ -403,17 +405,30 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
         if (v2found)
         {
             if (v1result.y != 0)
-                OutputDebugFormatA("UIA: (v1 also found (%d,%d) — not used, v2 wins)\n", v1result.x, v1result.y);
+                OutputDebugFormatA("UIA: (v1 also found (%d,%d) - not used, v2 wins)\n", v1result.x, v1result.y);
         }
         else if (v1result.y != 0)
         {
             result = v1result;
-            OutputDebugFormatA("UIA: (via TextPattern v1 GetSelection — v2 fallback)\n");
+            OutputDebugFormatA("UIA: (via TextPattern v1 GetSelection - v2 fallback)\n");
             return true;
         }
     }
 
     return v2found;
+}
+
+// Send Shift+Alt+F1 keystroke to the foreground window
+static void SendShiftAltF1()
+{
+    INPUT inputs[6] = {};
+    inputs[0].type = INPUT_KEYBOARD;  inputs[0].ki.wVk = VK_SHIFT;
+    inputs[1].type = INPUT_KEYBOARD;  inputs[1].ki.wVk = VK_MENU;
+    inputs[2].type = INPUT_KEYBOARD;  inputs[2].ki.wVk = VK_F1;
+    inputs[3].type = INPUT_KEYBOARD;  inputs[3].ki.wVk = VK_F1;    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[4].type = INPUT_KEYBOARD;  inputs[4].ki.wVk = VK_MENU;  inputs[4].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[5].type = INPUT_KEYBOARD;  inputs[5].ki.wVk = VK_SHIFT; inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(6, inputs, sizeof(INPUT));
 }
 
 POINT GetCaretPositionFromUIA()
@@ -423,8 +438,28 @@ POINT GetCaretPositionFromUIA()
     if (!g_pUIAutomation)
         return result;
 
+    // --- Auto-toggle VSCode screen reader mode (one-time per process) ---
+    // VSCode doesn't expose text geometry without screen reader mode.
+    // Toggling it ON then OFF primes the accessibility layer permanently.
+    static DWORD s_toggledPids[16] = {};
+    static int   s_toggledPidCount = 0;
+    static DWORD s_pendingTogglePid = 0;
+    static int   s_toggleState = 0;  // 0=idle, 1=first keystroke sent
+
+    if (s_toggleState == 1)
+    {
+        // Second step: send Shift+Alt+F1 again to toggle screen reader OFF
+        SendShiftAltF1();
+        OutputDebugFormatA("UIA: sending Shift+Alt+F1 (2/2, pid=%d) - accessibility primed\n", s_pendingTogglePid);
+        if (s_toggledPidCount < _countof(s_toggledPids))
+            s_toggledPids[s_toggledPidCount++] = s_pendingTogglePid;
+        s_pendingTogglePid = 0;
+        s_toggleState = 0;
+        return result;  // skip this tick, next call will get proper results
+    }
+
     // Throttle: UIA calls are expensive (especially FindFirst on large trees)
-    // COM/UIA creates worker threads on each call — must limit aggressively
+    // COM/UIA creates worker threads on each call - must limit aggressively
     static DWORD lastCallTime = 0;
     static POINT cachedResult = {};
     DWORD now = GetTickCount();
@@ -442,7 +477,31 @@ POINT GetCaretPositionFromUIA()
         pFocused->get_CurrentName(&name);
         pFocused->get_CurrentControlType(&ctrlType);
         OutputDebugFormatA("UIA: focused element: type=%d name='%S'\n", ctrlType, name ? name : L"(null)");
+
+        // Check if VSCode needs screen reader mode toggle
+        bool needsToggle = name && wcsstr(name, L"not accessible") && wcsstr(name, L"screen reader") && wcsstr(name, L"Shift+Alt+F1");
         if (name) SysFreeString(name);
+
+        if (needsToggle)
+        {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(g_hForegroundWindow, &pid);
+
+            bool alreadyToggled = false;
+            for (int i = 0; i < s_toggledPidCount; i++)
+                if (s_toggledPids[i] == pid) { alreadyToggled = true; break; }
+
+            if (!alreadyToggled)
+            {
+                // First step: send Shift+Alt+F1 to toggle screen reader ON
+                SendShiftAltF1();
+                OutputDebugFormatA("UIA: VSCode not accessible - sending Shift+Alt+F1 (1/2, pid=%d)\n", pid);
+                s_pendingTogglePid = pid;
+                s_toggleState = 1;
+                pFocused->Release();
+                return result;  // skip this tick
+            }
+        }
 
         if (TryGetCaretFromElement(pFocused, result))
         {
@@ -453,7 +512,7 @@ POINT GetCaretPositionFromUIA()
         pFocused->Release();
     }
 
-    // 2. Try from the foreground window's root element — search entire window tree
+    // 2. Try from the foreground window's root element - search entire window tree
     if (!g_hForegroundWindow)
         return result;
 
@@ -547,7 +606,7 @@ int GetContainerMethodsForWindow(HWND hwnd)
 }
 
 // ---------------------------------------------------------------------------
-// GetContainerRectFromUIA — use UIA ElementFromPoint to get the bounding
+// GetContainerRectFromUIA - use UIA ElementFromPoint to get the bounding
 // rectangle of the UI element at the given screen coordinates.
 // Returns a non-empty RECT on success, or {0,0,0,0} on failure.
 // ---------------------------------------------------------------------------
@@ -571,7 +630,7 @@ RECT GetContainerRectFromUIA(int x, int y)
 }
 
 // ---------------------------------------------------------------------------
-// FindSmallestChildContainingXY — find the smallest child window (by area)
+// FindSmallestChildContainingXY - find the smallest child window (by area)
 // that contains the given (x,y) point. Skips children as large as the parent.
 // ---------------------------------------------------------------------------
 struct FindChildByXY_Ctx

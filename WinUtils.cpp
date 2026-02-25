@@ -452,16 +452,10 @@ POINT GetCaretPositionFromAccessibility(HWND* pCaretWnd)
                 HWND hwnd = nullptr;
                 WindowFromAccessibleObject(pAcc, &hwnd);
                 *pCaretWnd = hwnd;
-                if (hwnd)
-                {
-                    RECT rc;
-                    GetWindowRect(hwnd, &rc);
-                    char cls[64] = {};
-                    GetClassNameA(hwnd, cls, sizeof(cls));
-                    OutputDebugFormatA("IAccessible caret window: hwnd=%p class='%s' rect=(%d,%d,%d,%d)\n",
-                                       hwnd, cls, rc.left, rc.top, rc.right, rc.bottom);
-                }
             }
+
+            OutputDebugFormatA("IAccessible caret: (%d,%d) size=%dx%d\n",
+                               x, y, w, h);
 
             pAcc->Release();
         }

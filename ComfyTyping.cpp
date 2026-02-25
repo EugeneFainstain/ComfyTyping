@@ -21,14 +21,14 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
                            LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam);
 
-// Dedicated thread for the low-level keyboard hook so UIA calls on the
-// main thread can't block keyboard delivery to other apps.
-static DWORD WINAPI KeyboardHookThreadProc(LPVOID lpParam)
+// Dedicated thread for low-level hooks so UIA calls on the
+// main thread can't block input delivery to other apps.
+static DWORD WINAPI InputHookThreadProc(LPVOID lpParam)
 {
-    HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, (HINSTANCE)lpParam, 0);
-    if (!hHook)
-        return 1;
+    HHOOK hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, (HINSTANCE)lpParam, 0);
+    HHOOK hMouseHook    = SetWindowsHookEx(WH_MOUSE_LL,    LowLevelMouseProc,    (HINSTANCE)lpParam, 0);
 
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0))
@@ -37,7 +37,8 @@ static DWORD WINAPI KeyboardHookThreadProc(LPVOID lpParam)
         DispatchMessage(&msg);
     }
 
-    UnhookWindowsHookEx(hHook);
+    if (hKeyboardHook) UnhookWindowsHookEx(hKeyboardHook);
+    if (hMouseHook)    UnhookWindowsHookEx(hMouseHook);
     return 0;
 }
 
@@ -91,7 +92,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                                     0,                 // [in] DWORD        idThread,
                                     WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS | WINEVENT_SKIPOWNTHREAD );//[in] DWORD        dwFlags
 
-    HANDLE hHookThread = CreateThread(nullptr, 0, KeyboardHookThreadProc, hInstance, 0, nullptr);
+    HANDLE hHookThread = CreateThread(nullptr, 0, InputHookThreadProc, hInstance, 0, nullptr);
 
     if( !hHookThread || !hWinEventHook )
     {
@@ -305,86 +306,115 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
 
-            POINT caret = {};
-            HWND  hwndCaretOwner = nullptr;  // filled by GetCaretPosition (gti.hwndCaret)
-            bool bCaretFromAccessibility = false;
-            int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
-
-            OutputDebugFormatA("========================================\n");
-
-            // Detection chain — only try methods enabled for this app
-            if (methods & CARET_METHOD_GUITHREADINFO)
-                caret = GetCaretPosition(&hwndCaretOwner);
-
-            if (caret.y == 0 && (methods & CARET_METHOD_IACCESSIBLE))
+            // Detect foreground window change
+            static HWND hPrevForeground = nullptr;
+            if (g_hForegroundWindow != hPrevForeground)
             {
-                HWND hwndAccCaret = nullptr;
-                caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
-                bCaretFromAccessibility = true;
-                // IAccessible's WindowFromAccessibleObject can give us the
-                // editor window directly — use it if gti.hwndCaret was empty
-                if (!hwndCaretOwner && hwndAccCaret)
-                    hwndCaretOwner = hwndAccCaret;
+                g_bCaretMightHaveMoved = true;
+                hPrevForeground = g_hForegroundWindow;
             }
 
-            if (caret.y == 0 && (methods & CARET_METHOD_UIA))
+            // Only run detection when something might have changed
+            if (g_bCaretMightHaveMoved)
             {
-                OutputDebugFormatA("Trying UIA...\n");
-                caret = GetCaretPositionFromUIA();
+                POINT caret = {};
+                HWND  hwndCaretOwner = nullptr;  // filled by GetCaretPosition (gti.hwndCaret)
+                bool bCaretFromAccessibility = false;
+                int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
+
+                OutputDebugFormatA("========================================\n");
+
+                // Detection chain — only try methods enabled for this app
+                if (methods & CARET_METHOD_GUITHREADINFO)
+                    caret = GetCaretPosition(&hwndCaretOwner);
+
+                if (caret.y == 0 && (methods & CARET_METHOD_IACCESSIBLE))
+                {
+                    HWND hwndAccCaret = nullptr;
+                    caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
+                    bCaretFromAccessibility = true;
+                    // IAccessible's WindowFromAccessibleObject can give us the
+                    // editor window directly — use it if gti.hwndCaret was empty
+                    if (!hwndCaretOwner && hwndAccCaret)
+                        hwndCaretOwner = hwndAccCaret;
+                }
+
+                if (caret.y == 0 && (methods & CARET_METHOD_UIA))
+                {
+                    OutputDebugFormatA("Trying UIA...\n");
+                    caret = GetCaretPositionFromUIA();
+                }
+
+                g_bCaretFromAccessibility = bCaretFromAccessibility;
+
+                // --- Container detection: find the bounding rect of the pane containing the caret ---
+                if (caret.y != 0)
+                {
+                    HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
+                    if (!hRoot) hRoot = g_hForegroundWindow;
+
+                    int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
+                    RECT rcFound = {};
+
+                    const char* containerMethodName = "fallback";
+
+                    // Method 1: HOOK — use g_hFocusedChildWnd from WinEventProc
+                    if ((containerMethods & CONTAINER_METHOD_HOOK) && rcFound.right == 0)
+                    {
+                        if (g_hFocusedChildWnd)
+                        {
+                            GetWindowRect(g_hFocusedChildWnd, &rcFound);
+                            containerMethodName = "HOOK";
+                        }
+                    }
+
+                    // Method 2: ENUM — smallest child window containing (x,y)
+                    if ((containerMethods & CONTAINER_METHOD_ENUM) && rcFound.right == 0)
+                    {
+                        HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y);
+                        if (hChild)
+                        {
+                            GetWindowRect(hChild, &rcFound);
+                            containerMethodName = "ENUM";
+                        }
+                    }
+
+                    // Method 3: UIA — ElementFromPoint
+                    if ((containerMethods & CONTAINER_METHOD_UIA) && rcFound.right == 0)
+                    {
+                        rcFound = GetContainerRectFromUIA(caret.x, caret.y);
+                        if (rcFound.right != 0)
+                            containerMethodName = "UIA";
+                    }
+
+                    // Fallback: use foreground window rect
+                    if (rcFound.right == 0)
+                        GetWindowRect(hRoot, &rcFound);
+
+                    g_rcContainer = rcFound;
+
+                    OutputDebugFormatA("Caret=(%d,%d) Container[%s]=(%d,%d,%d,%d) %dx%d\n",
+                                       caret.x, caret.y, containerMethodName,
+                                       rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
+                                       rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
+                }
+
+                if ((caret.y < 0) || (caret.y > g_iScreenHeight))
+                    caret.x = caret.y = 0;
+
+                if( g_hForegroundWindow != hWnd ) // Don't update the caret position if our window is in focus...
+                    g_ptCaret = caret;
+
+                g_bCaretMightHaveMoved = false;
             }
-
-            g_bCaretFromAccessibility = bCaretFromAccessibility;
-
-            // --- Container detection: find the bounding rect of the pane containing the caret ---
-            if (caret.y != 0)
-            {
-                HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
-                if (!hRoot) hRoot = g_hForegroundWindow;
-
-                int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
-                RECT rcFound = {};
-
-                // Method 1: HOOK — use g_hFocusedChildWnd from WinEventProc
-                if ((containerMethods & CONTAINER_METHOD_HOOK) && rcFound.right == 0)
-                {
-                    if (g_hFocusedChildWnd)
-                        GetWindowRect(g_hFocusedChildWnd, &rcFound);
-                }
-
-                // Method 2: ENUM — smallest child window containing (x,y)
-                if ((containerMethods & CONTAINER_METHOD_ENUM) && rcFound.right == 0)
-                {
-                    HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y);
-                    if (hChild)
-                        GetWindowRect(hChild, &rcFound);
-                }
-
-                // Method 3: UIA — ElementFromPoint
-                if ((containerMethods & CONTAINER_METHOD_UIA) && rcFound.right == 0)
-                {
-                    rcFound = GetContainerRectFromUIA(caret.x, caret.y);
-                }
-
-                // Fallback: use foreground window rect
-                if (rcFound.right == 0)
-                    GetWindowRect(hRoot, &rcFound);
-
-                g_rcContainer = rcFound;
-            }
-
-            if ((caret.y < 0) || (caret.y > g_iScreenHeight))
-                caret.x = caret.y = 0;
 
             static bool bWindowAtTheBottom = false;
 
-            if( ((caret.y != 0) && (g_bTemporarilyHideMyWindow == false)) ||
+            if( ((g_ptCaret.y != 0) && (g_bTemporarilyHideMyWindow == false)) ||
                 ((g_hForegroundWindow == hWnd) && (g_bTemporarilyHideMyWindow == false)) )
                 ShowMyWindow(hWnd); // Make sure we are still topmost (needed to be above the taskbar)
             else
                 HideMyWindow(hWnd); // This is now getting called on every WM_TIMER event... hmmm...
-
-            if( g_hForegroundWindow != hWnd ) // Don't update the caret position if our window is in focus...
-                g_ptCaret = caret;
         }
         break;
     case WM_MOVING:
@@ -632,6 +662,8 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
 {
     if( event == EVENT_OBJECT_FOCUS && idObject == OBJID_CLIENT )
     {
+        g_bCaretMightHaveMoved = true;
+
         // Don't accept the foreground window itself as a focused child —
         // the paint handler already falls back to it when child is null.
         if (hwnd == g_hForegroundWindow)
@@ -693,12 +725,24 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             UINT  mappedChar    = MapVirtualKey(virtualKey, MAPVK_VK_TO_CHAR); // maps the virtual key to a character
             bool  bPrintableKey = mappedChar && std::isprint(mappedChar); // Checks if the mapped character is printable
 
+            g_bCaretMightHaveMoved = true;
+
             if( virtualKey == VK_ESCAPE )
                 g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
             else
             if( bPrintableKey || virtualKey == VK_DELETE || virtualKey == VK_BACK )
                 g_bTemporarilyHideMyWindow = false;
         }
+    }
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
+
+LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    if (nCode == HC_ACTION)
+    {
+        if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN)
+            g_bCaretMightHaveMoved = true;
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }

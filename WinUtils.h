@@ -42,6 +42,7 @@ MYGLOBAL(int          , g_iNewFocusedChild, 0);
 
 MYGLOBAL(DWORD        , g_dwAppStartTime  , 0);
 MYGLOBAL(RECT         , g_rcContainer     , {});
+MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to detect on first tick
 
 // Caret detection method flags (combinable)
 #define CARET_METHOD_GUITHREADINFO   0x01  // GetGUIThreadInfo (fast Win32)

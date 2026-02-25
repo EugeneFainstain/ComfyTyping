@@ -16,6 +16,7 @@ MYGLOBAL(int          , g_iScreenWidth    , 100    );
 MYGLOBAL(int          , g_iScreenHeight   , 100    );
 
 MYGLOBAL(int          , g_iMyWidth        , 100    );
+MYGLOBAL(int          , g_iEffectiveWidth , 100    ); // <= g_iMyWidth, reduced when container is narrow
 MYGLOBAL(int          , g_iMyHeight       , 100    );
 
 MYGLOBAL(int          , g_iMyWindowX      , 100    );

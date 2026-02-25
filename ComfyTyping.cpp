@@ -214,6 +214,7 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     g_iScreenHeight    = GetSystemMetrics(SM_CYSCREEN);
 
     g_iMyWidth         = g_iScreenWidth - g_iScreenWidth / HORZ_PORTION;
+    g_iEffectiveWidth  = g_iMyWidth;
     g_iMyHeight        = g_iScreenHeight * ZOOM / VERT_PORTION;
 #if !defined(NO_RESIZE_NO_BORDER)
     g_iMyHeight += borderHeight*4;
@@ -244,7 +245,7 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 
 //bool g_bWindowAtTheBottom = false;
 void MySetWindowPos(HWND hWnd, bool bShow)
-     { SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, (bShow ? 1 : 4) * g_iMyWindowY, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE); }
+     { SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, (bShow ? 1 : 4) * g_iMyWindowY, g_iEffectiveWidth, g_iMyHeight, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE); }
 
 // void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) MySetWindowPos(hWnd, false); g_bWindowAtTheBottom = true; }
 // void ShowMyWindow(HWND hWnd) {                           MySetWindowPos(hWnd, true ); g_bWindowAtTheBottom = false; }
@@ -459,6 +460,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         OutputDebugFormatA("  => Winner: %s (%d wide)\n", bestName, bestWidth);
 
                     g_rcContainer = rcBest;
+
+                    // Shrink overlay width when container is narrower than the default capture area
+                    int containerWidth = rcBest.right - rcBest.left;
+                    int newEffective = min((int)g_iMyWidth, containerWidth * ZOOM);
+                    if (newEffective != g_iEffectiveWidth)
+                    {
+                        g_iEffectiveWidth = newEffective;
+                        g_iMyWindowX = (g_iScreenWidth - g_iEffectiveWidth) / 2;
+                    }
                 }
 
                 if ((caret.y < 0) || (caret.y > g_iScreenHeight))
@@ -490,7 +500,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if( g_rcContainer.right > g_rcContainer.left )
             {
-                int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to             capture
+                int width = g_iEffectiveWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
@@ -508,12 +518,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                     int iSrcX_match  = ptCaret.x / ZOOM;             // Cursor always matches real cursor
                     int iSrcX_left   = focusedChildRect.left;                      // Cursor starts from the left edge
-                    int iSrcX_right  = focusedChildRect.right - g_iMyWidth / ZOOM; // Cursor starts from the right edge
+                    int iSrcX_right  = focusedChildRect.right - width / ZOOM; // Cursor starts from the right edge
                     //int iSrcX_match  = width / ZOOM / 2;             // Cursor center matches screen center
-                    int iSrcX_center = ptCaret.x - g_iMyWidth / ZOOM / 2; // Cursor always in the center of the screen
+                    int iSrcX_center = ptCaret.x - width / ZOOM / 2; // Cursor always in the center of the screen
 
                     int iSrcX_left_edge  = ptCaret.x - 10; // Cursor always at the left edge of our window
-                    int iSrcX_right_edge = ptCaret.x - g_iMyWidth / ZOOM + 10; // Cursor always at the right edge of our window
+                    int iSrcX_right_edge = ptCaret.x - width / ZOOM + 10; // Cursor always at the right edge of our window
 
                     static int iSrcX_center_prev = iSrcX_center;
 
@@ -535,8 +545,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                         {
                             int iLeftCaret   =  iSrcX_left;
-                            int iCenterCaret = (iSrcX_left + iSrcX_right) / 2 + g_iMyWidth / ZOOM / 2;
-                            int iRightCaret  =               iSrcX_right      + g_iMyWidth / ZOOM;
+                            int iCenterCaret = (iSrcX_left + iSrcX_right) / 2 + width / ZOOM / 2;
+                            int iRightCaret  =               iSrcX_right      + width / ZOOM;
                             int iFirstThird  = (iLeftCaret*2 + iRightCaret*1) / 3;
                             int iSecondThird = (iLeftCaret*1 + iRightCaret*2) / 3;
 

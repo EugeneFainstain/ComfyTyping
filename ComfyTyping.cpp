@@ -325,7 +325,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 OutputDebugFormatA("======== APP: %s ========\n", g_szAppExeName);
 
                 // --- Caret detection chain ---
-                if (methods & CARET_METHOD_GUITHREADINFO)
+                if (methods & CARET_GTHI)
                 {
                     caret = GetCaretPosition(&hwndCaretOwner);
                     if (caret.y != 0)
@@ -336,7 +336,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 else
                     OutputDebugFormatA("  Caret [GuiThreadInfo]: skipped\n");
 
-                if (methods & CARET_METHOD_IACCESSIBLE)
+                if (methods & CARET_IACC)
                 {
                     if (caret.y == 0)
                     {
@@ -356,7 +356,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 else
                     OutputDebugFormatA("  Caret [IAccessible]  : skipped\n");
 
-                if (methods & CARET_METHOD_UIA)
+                if (methods & CARET_UIA)
                 {
                     if (caret.y == 0)
                     {
@@ -384,7 +384,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     RECT rcFound = {};
 
                     // Method 1: HOOK
-                    if (containerMethods & CONTAINER_METHOD_HOOK)
+                    if (containerMethods & CONTAINER_HOOK)
                     {
                         if (g_hFocusedChildWnd)
                         {
@@ -402,7 +402,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         OutputDebugFormatA("  Container [Hook]     : skipped\n");
 
                     // Method 2: ENUM
-                    if (containerMethods & CONTAINER_METHOD_ENUM)
+                    if (containerMethods & CONTAINER_ENUM)
                     {
                         if (rcFound.right == 0)
                         {
@@ -427,7 +427,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         OutputDebugFormatA("  Container [Enum]     : skipped\n");
 
                     // Method 3: UIA ElementFromPoint
-                    if (containerMethods & CONTAINER_METHOD_UIA)
+                    if (containerMethods & CONTAINER_UIA)
                     {
                         if (rcFound.right == 0)
                         {

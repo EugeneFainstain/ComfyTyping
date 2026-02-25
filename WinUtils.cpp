@@ -15,53 +15,102 @@
 static IUIAutomation* g_pUIAutomation = nullptr;
 
 // ---------------------------------------------------------------------------
-// Per-app caret detection config lookup
+// Per-app detection configuration
 // ---------------------------------------------------------------------------
-int GetCaretMethodsForWindow(HWND hwnd)
-{
 #ifdef USE_PER_APP_CARET_CONFIG
-    static HWND  cachedHwnd = nullptr;
-    static int   cachedMethods = CARET_METHOD_ALL;
+struct AppConfig
+{
+    const char* exeName;   // lowercase exe name
+    int         methods;   // CARET_* | CONTAINER_* flags
+};
 
-    if (hwnd == cachedHwnd)
-        return cachedMethods;
+// Per-app detection methods. Exe names are lowercase, matched against the
+// foreground window's process.
+//
+// Caret flags (tried in order: GuiThreadInfo -> IAccessible -> UIA):
+//   CARET_GTHI (0x001), CARET_IACC (0x002),
+//   CARET_UIA (0x004), CARET_ALL (0x007)
+//
+// Container flags (tried in order: HOOK -> ENUM -> UIA):
+//   CONTAINER_HOOK (0x010), CONTAINER_ENUM (0x020),
+//   CONTAINER_UIA (0x040), CONTAINER_ALL (0x070)
+//
+// Unknown apps get METHOD_ALL (0x077).
+//
+static const AppConfig g_appConfigTable[] = {
+    { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
+    { "code.exe",                         CARET_IACC | CARET_UIA |                                   CONTAINER_UIA },
+    { "cmd.exe",                                       CARET_UIA |                                   CONTAINER_UIA },
+    { "notepad++.exe",       CARET_GTHI | CARET_IACC             | CONTAINER_HOOK | CONTAINER_ENUM                 },
+    { "windowsterminal.exe",                           CARET_UIA |                                   CONTAINER_UIA },
+};
 
-    cachedHwnd = hwnd;
-    cachedMethods = CARET_METHOD_ALL; // default for unknown apps
-
-    // Get the exe name of the process that owns this window
+// Helper: extract lowercase exe name from a window's owning process.
+// Returns true on success, false if pid/process couldn't be queried.
+static bool GetExeNameForWindow(HWND hwnd, char* outExeName, int outSize)
+{
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
-    if (!pid)
-        return cachedMethods;
+    if (!pid) return false;
 
     HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!hProc)
-        return cachedMethods;
+    if (!hProc) return false;
 
     char fullPath[MAX_PATH] = {};
     DWORD pathLen = MAX_PATH;
     QueryFullProcessImageNameA(hProc, 0, fullPath, &pathLen);
     CloseHandle(hProc);
 
-    // Extract filename after last backslash, lowercase it
-    char exeName[MAX_PATH] = {};
     const char* lastSlash = strrchr(fullPath, '\\');
     const char* name = lastSlash ? lastSlash + 1 : fullPath;
-    for (int i = 0; name[i] && i < MAX_PATH - 1; i++)
-        exeName[i] = (char)tolower((unsigned char)name[i]);
+    for (int i = 0; name[i] && i < outSize - 1; i++)
+        outExeName[i] = (char)tolower((unsigned char)name[i]);
+
+    return true;
+}
+
+// Lookup: returns the combined methods mask for a window's owning process.
+// Caches by HWND; also sets g_szAppExeName as a side effect.
+static int GetMethodsForWindow(HWND hwnd)
+{
+    static HWND  cachedHwnd = nullptr;
+    static int   cachedMethods = METHOD_ALL;
+
+    if (hwnd == cachedHwnd)
+        return cachedMethods;
+
+    cachedHwnd = hwnd;
+    cachedMethods = METHOD_ALL; // default for unknown apps
+
+    char exeName[MAX_PATH] = {};
+    if (!GetExeNameForWindow(hwnd, exeName, MAX_PATH))
+        return cachedMethods;
 
     strncpy_s(g_szAppExeName, exeName, _TRUNCATE);
 
-    // Match against config table
-    #define APP_ENTRY(exe, caretM, containerM) if (strcmp(exeName, exe) == 0) { cachedMethods = caretM; return cachedMethods; }
-    APP_CONFIG_TABLE
-    #undef APP_ENTRY
+    for (int i = 0; i < _countof(g_appConfigTable); i++)
+    {
+        if (strcmp(exeName, g_appConfigTable[i].exeName) == 0)
+        {
+            cachedMethods = g_appConfigTable[i].methods;
+            return cachedMethods;
+        }
+    }
 
     OutputDebugFormatA("App '%s': no config, using all methods\n", exeName);
     return cachedMethods;
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Public accessors — extract caret or container bits from the combined mask
+// ---------------------------------------------------------------------------
+int GetCaretMethodsForWindow(HWND hwnd)
+{
+#ifdef USE_PER_APP_CARET_CONFIG
+    return GetMethodsForWindow(hwnd) & CARET_ALL;
 #else
-    return CARET_METHOD_ALL;
+    return CARET_ALL;
 #endif
 }
 
@@ -467,46 +516,12 @@ int GetTaskbarHeight()
     return taskbarHeight;
 }
 
-// ---------------------------------------------------------------------------
-// Per-app container detection config lookup (mirrors GetCaretMethodsForWindow)
-// ---------------------------------------------------------------------------
 int GetContainerMethodsForWindow(HWND hwnd)
 {
 #ifdef USE_PER_APP_CARET_CONFIG
-    static HWND  cachedHwnd = nullptr;
-    static int   cachedMethods = CONTAINER_METHOD_ALL;
-
-    if (hwnd == cachedHwnd)
-        return cachedMethods;
-
-    cachedHwnd = hwnd;
-    cachedMethods = CONTAINER_METHOD_ALL;
-
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    if (!pid) return cachedMethods;
-
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!hProc) return cachedMethods;
-
-    char fullPath[MAX_PATH] = {};
-    DWORD pathLen = MAX_PATH;
-    QueryFullProcessImageNameA(hProc, 0, fullPath, &pathLen);
-    CloseHandle(hProc);
-
-    char exeName[MAX_PATH] = {};
-    const char* lastSlash = strrchr(fullPath, '\\');
-    const char* name = lastSlash ? lastSlash + 1 : fullPath;
-    for (int i = 0; name[i] && i < MAX_PATH - 1; i++)
-        exeName[i] = (char)tolower((unsigned char)name[i]);
-
-    #define APP_ENTRY(exe, caretM, containerM) if (strcmp(exeName, exe) == 0) { cachedMethods = containerM; return cachedMethods; }
-    APP_CONFIG_TABLE
-    #undef APP_ENTRY
-
-    return cachedMethods;
+    return GetMethodsForWindow(hwnd) & CONTAINER_ALL;
 #else
-    return CONTAINER_METHOD_ALL;
+    return CONTAINER_ALL;
 #endif
 }
 

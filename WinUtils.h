@@ -50,17 +50,20 @@ MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to dete
     extern char g_szAppExeName[64];
 #endif
 
-// Caret detection method flags (combinable)
-#define CARET_METHOD_GUITHREADINFO   0x01  // GetGUIThreadInfo (fast Win32)
-#define CARET_METHOD_IACCESSIBLE     0x02  // IAccessible/MSAA
-#define CARET_METHOD_UIA             0x04  // UI Automation TextPattern
-#define CARET_METHOD_ALL (CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE | CARET_METHOD_UIA)
+// Detection method flags — all share one bitmask per app.
+// Caret methods (tried in order: GuiThreadInfo -> IAccessible -> UIA)
+#define CARET_GTHI   0x001
+#define CARET_IACC     0x002
+#define CARET_UIA             0x004
+#define CARET_ALL             0x007
 
-// Container detection method flags (combinable, tried in order: HOOK -> ENUM -> UIA)
-#define CONTAINER_METHOD_HOOK        0x01  // WinEventProc focus hook: g_hFocusedChildWnd
-#define CONTAINER_METHOD_ENUM        0x02  // EnumChildWindows: smallest child containing X,Y
-#define CONTAINER_METHOD_UIA         0x04  // UIA ElementFromPoint: bounding rect of element at caret
-#define CONTAINER_METHOD_ALL (CONTAINER_METHOD_HOOK | CONTAINER_METHOD_ENUM | CONTAINER_METHOD_UIA)
+// Container methods (tried in order: HOOK -> ENUM -> UIA)
+#define CONTAINER_HOOK        0x010
+#define CONTAINER_ENUM        0x020
+#define CONTAINER_UIA         0x040
+#define CONTAINER_ALL         0x070
+
+#define METHOD_ALL (CARET_ALL | CONTAINER_ALL)
 
 void OutputDebugFormatA(const char* format, ...);
 void DebugTraceA(const char* format, ...);

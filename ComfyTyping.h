@@ -33,27 +33,7 @@
 // apps (useful for testing compatibility with unknown apps).
 #define USE_PER_APP_CARET_CONFIG
 
-#ifdef USE_PER_APP_CARET_CONFIG
-// Per-app detection methods. Exe names are lowercase, matched against the
-// foreground window's process.
-//
-// Caret methods (tried in order: GetGUIThreadInfo -> IAccessible -> UIA):
-//   CARET_METHOD_GUITHREADINFO (0x01), CARET_METHOD_IACCESSIBLE (0x02),
-//   CARET_METHOD_UIA (0x04), CARET_METHOD_ALL (0x07)
-//
-// Container methods (tried in order: HOOK -> ENUM -> UIA):
-//   CONTAINER_METHOD_HOOK (0x01), CONTAINER_METHOD_ENUM (0x02),
-//   CONTAINER_METHOD_UIA (0x04), CONTAINER_METHOD_ALL (0x07)
-//
-// APP_ENTRY(exe, caret_methods, container_methods)
-// Unknown apps get _ALL for both.
-//
-#define APP_CONFIG_TABLE \
-    APP_ENTRY("devenv.exe",          CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE, CONTAINER_METHOD_ENUM | CONTAINER_METHOD_UIA) \
-    APP_ENTRY("code.exe",            CARET_METHOD_UIA,                                      CONTAINER_METHOD_UIA) \
-    APP_ENTRY("cmd.exe",             CARET_METHOD_UIA,                                      CONTAINER_METHOD_UIA) \
-    APP_ENTRY("notepad++.exe",       CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE, CONTAINER_METHOD_HOOK | CONTAINER_METHOD_ENUM) \
-    APP_ENTRY("windowsterminal.exe", CARET_METHOD_UIA,                                      CONTAINER_METHOD_UIA) \
-    /* Add more apps here */
-#endif
+// When USE_PER_APP_CARET_CONFIG is defined, per-app detection methods are
+// looked up from g_appConfigTable[] in WinUtils.cpp. Unknown apps get _ALL
+// for both caret and container methods.
 

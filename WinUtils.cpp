@@ -31,7 +31,7 @@ struct AppConfig
 //   CARET_GTHI (0x001), CARET_IACC (0x002),
 //   CARET_UIA (0x004), CARET_ALL (0x007)
 //
-// Container flags (tried in order: HOOK -> ENUM -> UIA):
+// Container flags (all tried, narrowest width wins):
 //   CONTAINER_HOOK (0x010), CONTAINER_ENUM (0x020),
 //   CONTAINER_UIA (0x040), CONTAINER_ALL (0x070)
 //
@@ -39,7 +39,7 @@ struct AppConfig
 //
 static const AppConfig g_appConfigTable[] = {
     { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
-    { "code.exe",                         CARET_IACC | CARET_UIA |                                   CONTAINER_UIA },
+    { "code.exe", 0xFF },
     { "cmd.exe",                                       CARET_UIA |                                   CONTAINER_UIA },
     { "notepad++.exe",       CARET_GTHI | CARET_IACC             | CONTAINER_HOOK | CONTAINER_ENUM                 },
     { "windowsterminal.exe",                           CARET_UIA |                                   CONTAINER_UIA },

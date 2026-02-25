@@ -52,16 +52,16 @@ MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to dete
 
 // Detection method flags — all share one bitmask per app.
 // Caret methods (tried in order: GuiThreadInfo -> IAccessible -> UIA)
-#define CARET_GTHI   0x001
-#define CARET_IACC     0x002
-#define CARET_UIA             0x004
-#define CARET_ALL             0x007
+#define CARET_GTHI      0x001
+#define CARET_IACC      0x002
+#define CARET_UIA       0x004
+#define CARET_ALL       0x007
 
-// Container methods (tried in order: HOOK -> ENUM -> UIA)
-#define CONTAINER_HOOK        0x010
-#define CONTAINER_ENUM        0x020
-#define CONTAINER_UIA         0x040
-#define CONTAINER_ALL         0x070
+// Container methods (all tried, narrowest width wins)
+#define CONTAINER_HOOK  0x010
+#define CONTAINER_ENUM  0x020
+#define CONTAINER_UIA   0x040
+#define CONTAINER_ALL   0x070
 
 #define METHOD_ALL (CARET_ALL | CONTAINER_ALL)
 

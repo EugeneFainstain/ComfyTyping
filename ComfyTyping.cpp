@@ -374,26 +374,31 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 g_bCaretFromAccessibility = bCaretFromAccessibility;
 
-                // --- Container detection ---
+                // --- Container detection (try all enabled, pick narrowest) ---
                 if (caret.y != 0)
                 {
                     HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
                     if (!hRoot) hRoot = g_hForegroundWindow;
 
                     int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
-                    RECT rcFound = {};
+                    RECT rcBest = {};
+                    int  bestWidth = INT_MAX;
+                    const char* bestName = "fallback";
 
                     // Method 1: HOOK
                     if (containerMethods & CONTAINER_HOOK)
                     {
                         if (g_hFocusedChildWnd)
                         {
-                            GetWindowRect(g_hFocusedChildWnd, &rcFound);
+                            RECT rc;
+                            GetWindowRect(g_hFocusedChildWnd, &rc);
+                            int w = rc.right - rc.left;
                             char cls[64] = {};
                             GetClassNameA(g_hFocusedChildWnd, cls, sizeof(cls));
                             OutputDebugFormatA("  Container [Hook]     : '%s' (%d,%d,%d,%d) %dx%d\n",
-                                               cls, rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
-                                               rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
+                                               cls, rc.left, rc.top, rc.right, rc.bottom,
+                                               w, rc.bottom - rc.top);
+                            if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Hook"; }
                         }
                         else
                             OutputDebugFormatA("  Container [Hook]     : no focused child\n");
@@ -404,24 +409,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     // Method 2: ENUM
                     if (containerMethods & CONTAINER_ENUM)
                     {
-                        if (rcFound.right == 0)
+                        int childCount = 0;
+                        HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y, &childCount);
+                        if (hChild)
                         {
-                            int childCount = 0;
-                            HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y, &childCount);
-                            if (hChild)
-                            {
-                                GetWindowRect(hChild, &rcFound);
-                                char cls[64] = {};
-                                GetClassNameA(hChild, cls, sizeof(cls));
-                                OutputDebugFormatA("  Container [Enum]     : '%s' (%d,%d,%d,%d) %dx%d\n",
-                                                   cls, rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
-                                                   rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
-                            }
-                            else
-                                OutputDebugFormatA("  Container [Enum]     : no match (%d children)\n", childCount);
+                            RECT rc;
+                            GetWindowRect(hChild, &rc);
+                            int w = rc.right - rc.left;
+                            char cls[64] = {};
+                            GetClassNameA(hChild, cls, sizeof(cls));
+                            OutputDebugFormatA("  Container [Enum]     : '%s' (%d,%d,%d,%d) %dx%d\n",
+                                               cls, rc.left, rc.top, rc.right, rc.bottom,
+                                               w, rc.bottom - rc.top);
+                            if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Enum"; }
                         }
                         else
-                            OutputDebugFormatA("  Container [Enum]     : -\n");
+                            OutputDebugFormatA("  Container [Enum]     : no match (%d children)\n", childCount);
                     }
                     else
                         OutputDebugFormatA("  Container [Enum]     : skipped\n");
@@ -429,32 +432,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     // Method 3: UIA ElementFromPoint
                     if (containerMethods & CONTAINER_UIA)
                     {
-                        if (rcFound.right == 0)
+                        RECT rc = GetContainerRectFromUIA(caret.x, caret.y);
+                        if (rc.right != 0)
                         {
-                            rcFound = GetContainerRectFromUIA(caret.x, caret.y);
-                            if (rcFound.right != 0)
-                                OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
-                                                   rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
-                                                   rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
-                            else
-                                OutputDebugFormatA("  Container [UIA]      : not found\n");
+                            int w = rc.right - rc.left;
+                            OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
+                                               rc.left, rc.top, rc.right, rc.bottom,
+                                               w, rc.bottom - rc.top);
+                            if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
                         }
                         else
-                            OutputDebugFormatA("  Container [UIA]      : -\n");
+                            OutputDebugFormatA("  Container [UIA]      : not found\n");
                     }
                     else
                         OutputDebugFormatA("  Container [UIA]      : skipped\n");
 
                     // Fallback: use foreground window rect
-                    if (rcFound.right == 0)
+                    if (bestWidth == INT_MAX)
                     {
-                        GetWindowRect(hRoot, &rcFound);
+                        GetWindowRect(hRoot, &rcBest);
                         OutputDebugFormatA("  Container [Fallback] : (%d,%d,%d,%d) %dx%d\n",
-                                           rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
-                                           rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
+                                           rcBest.left, rcBest.top, rcBest.right, rcBest.bottom,
+                                           rcBest.right - rcBest.left, rcBest.bottom - rcBest.top);
                     }
+                    else
+                        OutputDebugFormatA("  => Winner: %s (%d wide)\n", bestName, bestWidth);
 
-                    g_rcContainer = rcFound;
+                    g_rcContainer = rcBest;
                 }
 
                 if ((caret.y < 0) || (caret.y > g_iScreenHeight))

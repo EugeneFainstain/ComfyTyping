@@ -41,12 +41,19 @@ MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, false);
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 
 MYGLOBAL(DWORD        , g_dwAppStartTime  , 0);
+MYGLOBAL(RECT         , g_rcContainer     , {});
 
 // Caret detection method flags (combinable)
 #define CARET_METHOD_GUITHREADINFO   0x01  // GetGUIThreadInfo (fast Win32)
 #define CARET_METHOD_IACCESSIBLE     0x02  // IAccessible/MSAA
 #define CARET_METHOD_UIA             0x04  // UI Automation TextPattern
 #define CARET_METHOD_ALL (CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE | CARET_METHOD_UIA)
+
+// Container detection method flags (combinable, tried in order: HOOK -> ENUM -> UIA)
+#define CONTAINER_METHOD_HOOK        0x01  // WinEventProc focus hook: g_hFocusedChildWnd
+#define CONTAINER_METHOD_ENUM        0x02  // EnumChildWindows: smallest child containing X,Y
+#define CONTAINER_METHOD_UIA         0x04  // UIA ElementFromPoint: bounding rect of element at caret
+#define CONTAINER_METHOD_ALL (CONTAINER_METHOD_HOOK | CONTAINER_METHOD_ENUM | CONTAINER_METHOD_UIA)
 
 void OutputDebugFormatA(const char* format, ...);
 void DebugTraceA(const char* format, ...);
@@ -59,7 +66,9 @@ POINT GetCaretPositionFromUIA();
 POINT GetCaretPositionFromAccessibility(HWND* pCaretWnd = nullptr);
 int   GetTaskbarHeight();
 int   GetCaretMethodsForWindow(HWND hwnd);
-HWND  FindWidestChildContainingX(HWND hwndParent, int x);
+HWND  FindSmallestChildContainingXY(HWND hwndParent, int x, int y);
+RECT  GetContainerRectFromUIA(int x, int y);
+int   GetContainerMethodsForWindow(HWND hwnd);
 void  EnableRoundedCorners(HWND hwnd);
 
 #ifdef USE_FONT_HEIGHT

@@ -14,8 +14,6 @@
 //#define POSITION_OVER_TASKBAR
 #define NO_RESIZE_NO_BORDER
 
-#define ENUM_ONLY  // Use EnumChildWindows every tick, ignore focus hook for child detection
-
 #ifdef INVALIDATE_ON_TIMER
     #define INVALIDATE_TIMER_ID       1001  // Unique timer ID
     #define INVALIDATE_TIMER_INTERVAL 16    // 16 ms interval
@@ -37,22 +35,25 @@
 
 #ifdef USE_PER_APP_CARET_CONFIG
 // Per-app detection methods. Exe names are lowercase, matched against the
-// foreground window's process. Methods are tried in the fixed order:
-//    GetGUIThreadInfo -> IAccessible -> UIA
-// but only those whose flag is set for the matched app.
-// Unknown apps get CARET_METHOD_ALL (full fallback chain).
+// foreground window's process.
 //
-// Flags: CARET_METHOD_GUITHREADINFO (0x01)
-//        CARET_METHOD_IACCESSIBLE   (0x02)
-//        CARET_METHOD_UIA           (0x04)
-//        CARET_METHOD_ALL           (0x07)
+// Caret methods (tried in order: GetGUIThreadInfo -> IAccessible -> UIA):
+//   CARET_METHOD_GUITHREADINFO (0x01), CARET_METHOD_IACCESSIBLE (0x02),
+//   CARET_METHOD_UIA (0x04), CARET_METHOD_ALL (0x07)
+//
+// Container methods (tried in order: HOOK -> ENUM -> UIA):
+//   CONTAINER_METHOD_HOOK (0x01), CONTAINER_METHOD_ENUM (0x02),
+//   CONTAINER_METHOD_UIA (0x04), CONTAINER_METHOD_ALL (0x07)
+//
+// APP_ENTRY(exe, caret_methods, container_methods)
+// Unknown apps get _ALL for both.
 //
 #define APP_CONFIG_TABLE \
-    APP_ENTRY("devenv.exe",          CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE) \
-    APP_ENTRY("code.exe",            CARET_METHOD_UIA) \
-    APP_ENTRY("cmd.exe",             CARET_METHOD_UIA) \
-    APP_ENTRY("notepad++.exe",       CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE) \
-    APP_ENTRY("windowsterminal.exe", CARET_METHOD_UIA) \
+    APP_ENTRY("devenv.exe",          CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE, CONTAINER_METHOD_ENUM | CONTAINER_METHOD_UIA) \
+    APP_ENTRY("code.exe",            CARET_METHOD_UIA,                                      CONTAINER_METHOD_UIA) \
+    APP_ENTRY("cmd.exe",             CARET_METHOD_UIA,                                      CONTAINER_METHOD_UIA) \
+    APP_ENTRY("notepad++.exe",       CARET_METHOD_GUITHREADINFO | CARET_METHOD_IACCESSIBLE, CONTAINER_METHOD_HOOK | CONTAINER_METHOD_ENUM) \
+    APP_ENTRY("windowsterminal.exe", CARET_METHOD_UIA,                                      CONTAINER_METHOD_UIA) \
     /* Add more apps here */
 #endif
 

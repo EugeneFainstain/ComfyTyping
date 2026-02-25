@@ -52,7 +52,7 @@ int GetCaretMethodsForWindow(HWND hwnd)
         exeName[i] = (char)tolower((unsigned char)name[i]);
 
     // Match against config table
-    #define APP_ENTRY(exe, methods) if (strcmp(exeName, exe) == 0) { cachedMethods = methods; return cachedMethods; }
+    #define APP_ENTRY(exe, caretM, containerM) if (strcmp(exeName, exe) == 0) { cachedMethods = caretM; return cachedMethods; }
     APP_CONFIG_TABLE
     #undef APP_ENTRY
 
@@ -483,53 +483,118 @@ int GetTaskbarHeight()
 }
 
 // ---------------------------------------------------------------------------
-// Find the widest visible child window whose X-range contains the given X,
-// but is still narrower than the parent. This picks the editor pane over
-// small controls like search boxes.
+// Per-app container detection config lookup (mirrors GetCaretMethodsForWindow)
 // ---------------------------------------------------------------------------
-struct FindChildByX_Ctx
+int GetContainerMethodsForWindow(HWND hwnd)
 {
-    int   x;
-    int   parentWidth;
-    HWND  best;
-    int   bestWidth;
+#ifdef USE_PER_APP_CARET_CONFIG
+    static HWND  cachedHwnd = nullptr;
+    static int   cachedMethods = CONTAINER_METHOD_ALL;
+
+    if (hwnd == cachedHwnd)
+        return cachedMethods;
+
+    cachedHwnd = hwnd;
+    cachedMethods = CONTAINER_METHOD_ALL;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid) return cachedMethods;
+
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return cachedMethods;
+
+    char fullPath[MAX_PATH] = {};
+    DWORD pathLen = MAX_PATH;
+    QueryFullProcessImageNameA(hProc, 0, fullPath, &pathLen);
+    CloseHandle(hProc);
+
+    char exeName[MAX_PATH] = {};
+    const char* lastSlash = strrchr(fullPath, '\\');
+    const char* name = lastSlash ? lastSlash + 1 : fullPath;
+    for (int i = 0; name[i] && i < MAX_PATH - 1; i++)
+        exeName[i] = (char)tolower((unsigned char)name[i]);
+
+    #define APP_ENTRY(exe, caretM, containerM) if (strcmp(exeName, exe) == 0) { cachedMethods = containerM; return cachedMethods; }
+    APP_CONFIG_TABLE
+    #undef APP_ENTRY
+
+    return cachedMethods;
+#else
+    return CONTAINER_METHOD_ALL;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// GetContainerRectFromUIA — use UIA ElementFromPoint to get the bounding
+// rectangle of the UI element at the given screen coordinates.
+// Returns a non-empty RECT on success, or {0,0,0,0} on failure.
+// ---------------------------------------------------------------------------
+RECT GetContainerRectFromUIA(int x, int y)
+{
+    RECT result = {};
+    if (!g_pUIAutomation) return result;
+
+    POINT pt = { x, y };
+    IUIAutomationElement* pElement = nullptr;
+    HRESULT hr = g_pUIAutomation->ElementFromPoint(pt, &pElement);
+    if (FAILED(hr) || !pElement) return result;
+
+    RECT rc;
+    hr = pElement->get_CurrentBoundingRectangle(&rc);
+    if (SUCCEEDED(hr) && (rc.right - rc.left) > 50 && (rc.bottom - rc.top) > 10)
+        result = rc;
+
+    pElement->Release();
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// FindSmallestChildContainingXY — find the smallest child window (by area)
+// that contains the given (x,y) point. Skips children as large as the parent.
+// ---------------------------------------------------------------------------
+struct FindChildByXY_Ctx
+{
+    int      x;
+    int      y;
+    int      parentArea;
+    HWND     best;
+    int      bestArea;
 };
 
-static BOOL CALLBACK EnumChildProc_FindByX(HWND hwnd, LPARAM lParam)
+static BOOL CALLBACK EnumChildProc_FindByXY(HWND hwnd, LPARAM lParam)
 {
-    auto* ctx = reinterpret_cast<FindChildByX_Ctx*>(lParam);
-
-    if (!IsWindowVisible(hwnd))
-        return TRUE; // skip invisible
+    auto* ctx = reinterpret_cast<FindChildByXY_Ctx*>(lParam);
 
     RECT rc;
     GetWindowRect(hwnd, &rc);
     int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    int area = w * h;
 
-    if (w < 50)              // skip tiny windows
-        return TRUE;
-    if (w >= ctx->parentWidth) // skip if as wide as parent (not useful)
-        return TRUE;
+    if (w < 50 || h < 10)       return TRUE;  // skip tiny windows
+    if (area >= ctx->parentArea) return TRUE;  // skip if as large as parent
 
-    if (ctx->x >= rc.left && ctx->x <= rc.right)
+    if (ctx->x >= rc.left && ctx->x <= rc.right &&
+        ctx->y >= rc.top  && ctx->y <= rc.bottom)
     {
-        if (!ctx->best || w > ctx->bestWidth) // widest wins
+        if (!ctx->best || area < ctx->bestArea) // smallest wins
         {
             ctx->best = hwnd;
-            ctx->bestWidth = w;
+            ctx->bestArea = area;
         }
     }
-    return TRUE; // continue enumeration
+    return TRUE;
 }
 
-HWND FindWidestChildContainingX(HWND hwndParent, int x)
+HWND FindSmallestChildContainingXY(HWND hwndParent, int x, int y)
 {
     RECT rcParent;
     GetWindowRect(hwndParent, &rcParent);
-    int parentWidth = rcParent.right - rcParent.left;
+    int parentArea = (rcParent.right - rcParent.left) * (rcParent.bottom - rcParent.top);
 
-    FindChildByX_Ctx ctx = { x, parentWidth, nullptr, 0 };
-    EnumChildWindows(hwndParent, EnumChildProc_FindByX, (LPARAM)&ctx);
+    FindChildByXY_Ctx ctx = { x, y, parentArea, nullptr, 0 };
+    EnumChildWindows(hwndParent, EnumChildProc_FindByXY, (LPARAM)&ctx);
     return ctx.best;
 }
 

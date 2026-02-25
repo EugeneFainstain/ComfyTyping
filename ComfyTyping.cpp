@@ -335,68 +335,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             g_bCaretFromAccessibility = bCaretFromAccessibility;
 
-            // Trace the caret owner for debugging (only on change)
-            {
-                static HWND hPrevCaretOwner = nullptr;
-                if (hwndCaretOwner != hPrevCaretOwner && hwndCaretOwner && caret.y != 0)
-                {
-                    char cls[64] = {};
-                    GetClassNameA(hwndCaretOwner, cls, sizeof(cls));
-                    RECT rc = {};
-                    GetWindowRect(hwndCaretOwner, &rc);
-                    DebugTraceA("TIMER: caretOwner=%p '%s' (%d,%d,%d,%d)%s\n",
-                                hwndCaretOwner, cls, rc.left, rc.top, rc.right, rc.bottom,
-                                (hwndCaretOwner == g_hForegroundWindow) ? " [=foreground]" : "");
-                    hPrevCaretOwner = hwndCaretOwner;
-                }
-            }
-
-        #ifdef ENUM_ONLY
-            // ENUM_ONLY: always find the child by enumerating every tick
+            // --- Container detection: find the bounding rect of the pane containing the caret ---
             if (caret.y != 0)
             {
-                HWND hFound = FindWidestChildContainingX(g_hForegroundWindow, caret.x);
-                g_hFocusedChildWnd = hFound; // may be null if no children
-            }
-        #else
-            // If g_hFocusedChildWnd doesn't contain the caret's X position,
-            // it's a stale window from another panel (e.g. Solution Explorer).
-            // Reset it so the paint handler falls back to g_hForegroundWindow
-            // until WinEventProc provides the correct child.
-            if (g_hFocusedChildWnd && caret.y != 0)
-            {
-                RECT rcChild;
-                GetWindowRect(g_hFocusedChildWnd, &rcChild);
-                if (caret.x < rcChild.left || caret.x > rcChild.right)
-                {
-                    DebugTraceA("TIMER: X-reset child %p (caret.x=%d outside [%d..%d])\n",
-                                g_hFocusedChildWnd, caret.x, rcChild.left, rcChild.right);
-                    g_hFocusedChildWnd = nullptr;
-                }
-            }
+                HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
+                if (!hRoot) hRoot = g_hForegroundWindow;
 
-            // Seed: if hook hasn't given us a child yet, try to find one
-            // by enumerating children whose X-range contains the caret.
-            if (!g_hFocusedChildWnd && caret.y != 0)
-            {
-                HWND hSeed = FindWidestChildContainingX(g_hForegroundWindow, caret.x);
-                if (hSeed)
-                    g_hFocusedChildWnd = hSeed;
-            }
-        #endif
+                int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
+                RECT rcFound = {};
 
-            // Log the focused child window (only on change)
-            {
-                static HWND hPrevTimerChild = nullptr;
-                if (g_hFocusedChildWnd != hPrevTimerChild)
+                // Method 1: HOOK — use g_hFocusedChildWnd from WinEventProc
+                if ((containerMethods & CONTAINER_METHOD_HOOK) && rcFound.right == 0)
                 {
-                    char cls[64] = {};
-                    RECT rc = {};
-                    if (g_hFocusedChildWnd) { GetClassNameA(g_hFocusedChildWnd, cls, sizeof(cls)); GetWindowRect(g_hFocusedChildWnd, &rc); }
-                    DebugTraceA("TIMER: child=%p '%s' (%d,%d,%d,%d) caret=(%d,%d)\n",
-                                g_hFocusedChildWnd, cls, rc.left, rc.top, rc.right, rc.bottom, caret.x, caret.y);
-                    hPrevTimerChild = g_hFocusedChildWnd;
+                    if (g_hFocusedChildWnd)
+                        GetWindowRect(g_hFocusedChildWnd, &rcFound);
                 }
+
+                // Method 2: ENUM — smallest child window containing (x,y)
+                if ((containerMethods & CONTAINER_METHOD_ENUM) && rcFound.right == 0)
+                {
+                    HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y);
+                    if (hChild)
+                        GetWindowRect(hChild, &rcFound);
+                }
+
+                // Method 3: UIA — ElementFromPoint
+                if ((containerMethods & CONTAINER_METHOD_UIA) && rcFound.right == 0)
+                {
+                    rcFound = GetContainerRectFromUIA(caret.x, caret.y);
+                }
+
+                // Fallback: use foreground window rect
+                if (rcFound.right == 0)
+                    GetWindowRect(hRoot, &rcFound);
+
+                g_rcContainer = rcFound;
             }
 
             if ((caret.y < 0) || (caret.y > g_iScreenHeight))
@@ -423,43 +396,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
 
-            HWND hFocusedChildWnd = g_hFocusedChildWnd;
-            bool bUsedFallback = false;
-
-            if( !hFocusedChildWnd )
-            {
-                hFocusedChildWnd = g_hForegroundWindow;
-                bUsedFallback = true;
-            }
-
-            if( g_iNewFocusedChild )
-                g_iNewFocusedChild--;
-
-            if( hFocusedChildWnd )
+            if( g_rcContainer.right > g_rcContainer.left )
             {
                 int width = g_iMyWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to             capture
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
-                RECT focusedChildRect;
-                GetWindowRect(hFocusedChildWnd, &focusedChildRect); // Should be always valid...
-
-                {
-                    static HWND hPrevPaintChild = nullptr;
-                    static bool bPrevFallback = false;
-                    if (hFocusedChildWnd != hPrevPaintChild || bUsedFallback != bPrevFallback)
-                    {
-                        char cls[64] = {};
-                        GetClassNameA(hFocusedChildWnd, cls, sizeof(cls));
-                        DebugTraceA("PAINT: using %p '%s' rect=(%d,%d,%d,%d)%s\n",
-                                    hFocusedChildWnd, cls,
-                                    focusedChildRect.left, focusedChildRect.top,
-                                    focusedChildRect.right, focusedChildRect.bottom,
-                                    bUsedFallback ? " [FALLBACK to foreground]" : "");
-                        hPrevPaintChild = hFocusedChildWnd;
-                        bPrevFallback = bUsedFallback;
-                    }
-                }
+                RECT focusedChildRect = g_rcContainer;
 
                 int iSrcX = 0;
                 int iSrcY = 0;
@@ -607,9 +550,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             g_bTemporarilyHideMyWindow = false;
 
-            HWND hFocusedChildWnd = g_hFocusedChildWnd; // Snapshot so it doesn't change mid-way
-
-            if( hFocusedChildWnd )
+            if( g_rcContainer.right > g_rcContainer.left )
             {
                 POINT ptCurrent; GetCursorPos(&ptCurrent);
 
@@ -691,26 +632,10 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
 {
     if( event == EVENT_OBJECT_FOCUS && idObject == OBJID_CLIENT )
     {
-        // Log for diagnostics
-        char cls[64] = {};
-        GetClassNameA(hwnd, cls, sizeof(cls));
-        RECT rc;
-        GetWindowRect(hwnd, &rc);
-        DebugTraceA("HOOK: incoming hwnd=%p class='%s' rect=(%d,%d,%d,%d)\n",
-                     hwnd, cls, rc.left, rc.top, rc.right, rc.bottom);
-
-    #ifdef ENUM_ONLY
-        return; // ENUM_ONLY: ignore focus hook, child is set by EnumChildWindows in timer
-    #endif
-
         // Don't accept the foreground window itself as a focused child —
         // the paint handler already falls back to it when child is null.
-        // Accepting it would "lock in" a too-wide rect that X-validation can't reset.
         if (hwnd == g_hForegroundWindow)
-        {
-            DebugTraceA("HOOK: ignoring foreground window %p\n", hwnd);
             return;
-        }
 
         HWND oldChild = g_hFocusedChildWnd;
 
@@ -723,7 +648,6 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
             if( hwnd == hwndPrevMatchedParent )
             {
                 g_hFocusedChildWnd = hwndPrevMatchedParent_itsChild;
-                DebugTraceA("HOOK: cached-parent match -> restore child %p\n", g_hFocusedChildWnd);
             }
             else
             {
@@ -736,21 +660,16 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
                     bIsParent = TRUE;
                     hwndPrevMatchedParent = hwndParent;
                     hwndPrevMatchedParent_itsChild = g_hFocusedChildWnd;
-                    DebugTraceA("HOOK: hwnd is parent of current child -> keep child %p\n", g_hFocusedChildWnd);
                     break;
                 }
 
                 if( bIsParent == FALSE )
-                {
                     g_hFocusedChildWnd = hwnd;
-                    DebugTraceA("HOOK: new child %p (was %p)\n", hwnd, oldChild);
-                }
             }
         }
         else
         {
             g_hFocusedChildWnd = hwnd;
-            DebugTraceA("HOOK: first child %p (was null)\n", hwnd);
         }
 
         ///////////////////////////////////////////////////////////////

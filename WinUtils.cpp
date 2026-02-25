@@ -76,6 +76,24 @@ void OutputDebugFormatA(const char* format, ...)
     OutputDebugStringA(buffer);
 }
 
+void DebugTraceA(const char* format, ...)
+{
+    // Always prints (ignores CAPS LOCK). Prefixes with seconds since app start.
+    DWORD elapsed = GetTickCount() - g_dwAppStartTime;
+    char prefix[32];
+    snprintf(prefix, sizeof(prefix), "[%7.3f] ", elapsed / 1000.0);
+
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    char full[300];
+    snprintf(full, sizeof(full), "%s%s", prefix, buffer);
+    OutputDebugStringA(full);
+}
+
 float GetDpiScaleFactor(HWND hWnd)
 {
     int dpi = GetDpiForWindow(hWnd);  // Windows 8.1+ (Use 96 DPI as base)
@@ -462,6 +480,57 @@ int GetTaskbarHeight()
     // Calculate the taskbar height
     int taskbarHeight = g_iScreenHeight - workAreaHeight;
     return taskbarHeight;
+}
+
+// ---------------------------------------------------------------------------
+// Find the widest visible child window whose X-range contains the given X,
+// but is still narrower than the parent. This picks the editor pane over
+// small controls like search boxes.
+// ---------------------------------------------------------------------------
+struct FindChildByX_Ctx
+{
+    int   x;
+    int   parentWidth;
+    HWND  best;
+    int   bestWidth;
+};
+
+static BOOL CALLBACK EnumChildProc_FindByX(HWND hwnd, LPARAM lParam)
+{
+    auto* ctx = reinterpret_cast<FindChildByX_Ctx*>(lParam);
+
+    if (!IsWindowVisible(hwnd))
+        return TRUE; // skip invisible
+
+    RECT rc;
+    GetWindowRect(hwnd, &rc);
+    int w = rc.right - rc.left;
+
+    if (w < 50)              // skip tiny windows
+        return TRUE;
+    if (w >= ctx->parentWidth) // skip if as wide as parent (not useful)
+        return TRUE;
+
+    if (ctx->x >= rc.left && ctx->x <= rc.right)
+    {
+        if (!ctx->best || w > ctx->bestWidth) // widest wins
+        {
+            ctx->best = hwnd;
+            ctx->bestWidth = w;
+        }
+    }
+    return TRUE; // continue enumeration
+}
+
+HWND FindWidestChildContainingX(HWND hwndParent, int x)
+{
+    RECT rcParent;
+    GetWindowRect(hwndParent, &rcParent);
+    int parentWidth = rcParent.right - rcParent.left;
+
+    FindChildByX_Ctx ctx = { x, parentWidth, nullptr, 0 };
+    EnumChildWindows(hwndParent, EnumChildProc_FindByX, (LPARAM)&ctx);
+    return ctx.best;
 }
 
 #ifdef RENDER_CURSOR

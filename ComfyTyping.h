@@ -14,13 +14,15 @@
 //#define POSITION_OVER_TASKBAR
 #define NO_RESIZE_NO_BORDER
 
+#define ENUM_ONLY  // Use EnumChildWindows every tick, ignore focus hook for child detection
+
 #ifdef INVALIDATE_ON_TIMER
     #define INVALIDATE_TIMER_ID       1001  // Unique timer ID
     #define INVALIDATE_TIMER_INTERVAL 16    // 16 ms interval
 #endif
 
 #define CARET_TIMER_ID       1002   // Unique timer ID
-#define CARET_TIMER_INTERVAL 1      //16 // 16 ms interval
+#define CARET_TIMER_INTERVAL 500    // DEBUG: normally 1ms, slowed for tracing
 
 #define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )
 #define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )

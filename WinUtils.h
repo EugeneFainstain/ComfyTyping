@@ -44,6 +44,12 @@ MYGLOBAL(DWORD        , g_dwAppStartTime  , 0);
 MYGLOBAL(RECT         , g_rcContainer     , {});
 MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to detect on first tick
 
+#ifdef WIN_UTILS_CPP
+    char g_szAppExeName[64] = {};
+#else
+    extern char g_szAppExeName[64];
+#endif
+
 // Caret detection method flags (combinable)
 #define CARET_METHOD_GUITHREADINFO   0x01  // GetGUIThreadInfo (fast Win32)
 #define CARET_METHOD_IACCESSIBLE     0x02  // IAccessible/MSAA
@@ -67,7 +73,7 @@ POINT GetCaretPositionFromUIA();
 POINT GetCaretPositionFromAccessibility(HWND* pCaretWnd = nullptr);
 int   GetTaskbarHeight();
 int   GetCaretMethodsForWindow(HWND hwnd);
-HWND  FindSmallestChildContainingXY(HWND hwndParent, int x, int y);
+HWND  FindSmallestChildContainingXY(HWND hwndParent, int x, int y, int* pChildCount = nullptr);
 RECT  GetContainerRectFromUIA(int x, int y);
 int   GetContainerMethodsForWindow(HWND hwnd);
 void  EnableRoundedCorners(HWND hwnd);

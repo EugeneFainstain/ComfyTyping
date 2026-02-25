@@ -51,6 +51,8 @@ int GetCaretMethodsForWindow(HWND hwnd)
     for (int i = 0; name[i] && i < MAX_PATH - 1; i++)
         exeName[i] = (char)tolower((unsigned char)name[i]);
 
+    strncpy_s(g_szAppExeName, exeName, _TRUNCATE);
+
     // Match against config table
     #define APP_ENTRY(exe, caretM, containerM) if (strcmp(exeName, exe) == 0) { cachedMethods = caretM; return cachedMethods; }
     APP_CONFIG_TABLE
@@ -131,14 +133,6 @@ POINT GetCaretPosition(HWND* pCaretWnd)
         // Return the caret-owning HWND to the caller
         if (pCaretWnd)
             *pCaretWnd = gti.hwndCaret;
-
-        // Log the caret window info
-        RECT rc;
-        GetWindowRect(gti.hwndCaret, &rc);
-        char cls[64] = {};
-        GetClassNameA(gti.hwndCaret, cls, sizeof(cls));
-        OutputDebugFormatA("gti.hwndCaret: hwnd=%p class='%s' rect=(%d,%d,%d,%d)\n",
-                           gti.hwndCaret, cls, rc.left, rc.top, rc.right, rc.bottom);
 
         if( retPoint.y > 2160*3 )
         { int i = 5; }
@@ -454,9 +448,6 @@ POINT GetCaretPositionFromAccessibility(HWND* pCaretWnd)
                 *pCaretWnd = hwnd;
             }
 
-            OutputDebugFormatA("IAccessible caret: (%d,%d) size=%dx%d\n",
-                               x, y, w, h);
-
             pAcc->Release();
         }
     }
@@ -554,11 +545,13 @@ struct FindChildByXY_Ctx
     int      parentArea;
     HWND     best;
     int      bestArea;
+    int      totalChildren;
 };
 
 static BOOL CALLBACK EnumChildProc_FindByXY(HWND hwnd, LPARAM lParam)
 {
     auto* ctx = reinterpret_cast<FindChildByXY_Ctx*>(lParam);
+    ctx->totalChildren++;
 
     RECT rc;
     GetWindowRect(hwnd, &rc);
@@ -581,14 +574,15 @@ static BOOL CALLBACK EnumChildProc_FindByXY(HWND hwnd, LPARAM lParam)
     return TRUE;
 }
 
-HWND FindSmallestChildContainingXY(HWND hwndParent, int x, int y)
+HWND FindSmallestChildContainingXY(HWND hwndParent, int x, int y, int* pChildCount)
 {
     RECT rcParent;
     GetWindowRect(hwndParent, &rcParent);
     int parentArea = (rcParent.right - rcParent.left) * (rcParent.bottom - rcParent.top);
 
-    FindChildByXY_Ctx ctx = { x, y, parentArea, nullptr, 0 };
+    FindChildByXY_Ctx ctx = { x, y, parentArea, nullptr, 0, 0 };
     EnumChildWindows(hwndParent, EnumChildProc_FindByXY, (LPARAM)&ctx);
+    if (pChildCount) *pChildCount = ctx.totalChildren;
     return ctx.best;
 }
 

@@ -322,32 +322,59 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 bool bCaretFromAccessibility = false;
                 int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
 
-                OutputDebugFormatA("========================================\n");
+                OutputDebugFormatA("======== APP: %s ========\n", g_szAppExeName);
 
-                // Detection chain — only try methods enabled for this app
+                // --- Caret detection chain ---
                 if (methods & CARET_METHOD_GUITHREADINFO)
+                {
                     caret = GetCaretPosition(&hwndCaretOwner);
-
-                if (caret.y == 0 && (methods & CARET_METHOD_IACCESSIBLE))
-                {
-                    HWND hwndAccCaret = nullptr;
-                    caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
-                    bCaretFromAccessibility = true;
-                    // IAccessible's WindowFromAccessibleObject can give us the
-                    // editor window directly — use it if gti.hwndCaret was empty
-                    if (!hwndCaretOwner && hwndAccCaret)
-                        hwndCaretOwner = hwndAccCaret;
+                    if (caret.y != 0)
+                        OutputDebugFormatA("  Caret [GuiThreadInfo]: (%d,%d)\n", caret.x, caret.y);
+                    else
+                        OutputDebugFormatA("  Caret [GuiThreadInfo]: not found\n");
                 }
+                else
+                    OutputDebugFormatA("  Caret [GuiThreadInfo]: skipped\n");
 
-                if (caret.y == 0 && (methods & CARET_METHOD_UIA))
+                if (methods & CARET_METHOD_IACCESSIBLE)
                 {
-                    OutputDebugFormatA("Trying UIA...\n");
-                    caret = GetCaretPositionFromUIA();
+                    if (caret.y == 0)
+                    {
+                        HWND hwndAccCaret = nullptr;
+                        caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
+                        bCaretFromAccessibility = true;
+                        if (!hwndCaretOwner && hwndAccCaret)
+                            hwndCaretOwner = hwndAccCaret;
+                        if (caret.y != 0)
+                            OutputDebugFormatA("  Caret [IAccessible]  : (%d,%d)\n", caret.x, caret.y);
+                        else
+                            OutputDebugFormatA("  Caret [IAccessible]  : not found\n");
+                    }
+                    else
+                        OutputDebugFormatA("  Caret [IAccessible]  : -\n");
                 }
+                else
+                    OutputDebugFormatA("  Caret [IAccessible]  : skipped\n");
+
+                if (methods & CARET_METHOD_UIA)
+                {
+                    if (caret.y == 0)
+                    {
+                        caret = GetCaretPositionFromUIA();
+                        if (caret.y != 0)
+                            OutputDebugFormatA("  Caret [UIA]          : (%d,%d)\n", caret.x, caret.y);
+                        else
+                            OutputDebugFormatA("  Caret [UIA]          : not found\n");
+                    }
+                    else
+                        OutputDebugFormatA("  Caret [UIA]          : -\n");
+                }
+                else
+                    OutputDebugFormatA("  Caret [UIA]          : skipped\n");
 
                 g_bCaretFromAccessibility = bCaretFromAccessibility;
 
-                // --- Container detection: find the bounding rect of the pane containing the caret ---
+                // --- Container detection ---
                 if (caret.y != 0)
                 {
                     HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
@@ -356,47 +383,78 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
                     RECT rcFound = {};
 
-                    const char* containerMethodName = "fallback";
-
-                    // Method 1: HOOK — use g_hFocusedChildWnd from WinEventProc
-                    if ((containerMethods & CONTAINER_METHOD_HOOK) && rcFound.right == 0)
+                    // Method 1: HOOK
+                    if (containerMethods & CONTAINER_METHOD_HOOK)
                     {
                         if (g_hFocusedChildWnd)
                         {
                             GetWindowRect(g_hFocusedChildWnd, &rcFound);
-                            containerMethodName = "HOOK";
+                            char cls[64] = {};
+                            GetClassNameA(g_hFocusedChildWnd, cls, sizeof(cls));
+                            OutputDebugFormatA("  Container [Hook]     : '%s' (%d,%d,%d,%d) %dx%d\n",
+                                               cls, rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
+                                               rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
                         }
+                        else
+                            OutputDebugFormatA("  Container [Hook]     : no focused child\n");
                     }
+                    else
+                        OutputDebugFormatA("  Container [Hook]     : skipped\n");
 
-                    // Method 2: ENUM — smallest child window containing (x,y)
-                    if ((containerMethods & CONTAINER_METHOD_ENUM) && rcFound.right == 0)
+                    // Method 2: ENUM
+                    if (containerMethods & CONTAINER_METHOD_ENUM)
                     {
-                        HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y);
-                        if (hChild)
+                        if (rcFound.right == 0)
                         {
-                            GetWindowRect(hChild, &rcFound);
-                            containerMethodName = "ENUM";
+                            int childCount = 0;
+                            HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y, &childCount);
+                            if (hChild)
+                            {
+                                GetWindowRect(hChild, &rcFound);
+                                char cls[64] = {};
+                                GetClassNameA(hChild, cls, sizeof(cls));
+                                OutputDebugFormatA("  Container [Enum]     : '%s' (%d,%d,%d,%d) %dx%d\n",
+                                                   cls, rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
+                                                   rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
+                            }
+                            else
+                                OutputDebugFormatA("  Container [Enum]     : no match (%d children)\n", childCount);
                         }
+                        else
+                            OutputDebugFormatA("  Container [Enum]     : -\n");
                     }
+                    else
+                        OutputDebugFormatA("  Container [Enum]     : skipped\n");
 
-                    // Method 3: UIA — ElementFromPoint
-                    if ((containerMethods & CONTAINER_METHOD_UIA) && rcFound.right == 0)
+                    // Method 3: UIA ElementFromPoint
+                    if (containerMethods & CONTAINER_METHOD_UIA)
                     {
-                        rcFound = GetContainerRectFromUIA(caret.x, caret.y);
-                        if (rcFound.right != 0)
-                            containerMethodName = "UIA";
+                        if (rcFound.right == 0)
+                        {
+                            rcFound = GetContainerRectFromUIA(caret.x, caret.y);
+                            if (rcFound.right != 0)
+                                OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
+                                                   rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
+                                                   rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
+                            else
+                                OutputDebugFormatA("  Container [UIA]      : not found\n");
+                        }
+                        else
+                            OutputDebugFormatA("  Container [UIA]      : -\n");
                     }
+                    else
+                        OutputDebugFormatA("  Container [UIA]      : skipped\n");
 
                     // Fallback: use foreground window rect
                     if (rcFound.right == 0)
+                    {
                         GetWindowRect(hRoot, &rcFound);
+                        OutputDebugFormatA("  Container [Fallback] : (%d,%d,%d,%d) %dx%d\n",
+                                           rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
+                                           rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
+                    }
 
                     g_rcContainer = rcFound;
-
-                    OutputDebugFormatA("Caret=(%d,%d) Container[%s]=(%d,%d,%d,%d) %dx%d\n",
-                                       caret.x, caret.y, containerMethodName,
-                                       rcFound.left, rcFound.top, rcFound.right, rcFound.bottom,
-                                       rcFound.right - rcFound.left, rcFound.bottom - rcFound.top);
                 }
 
                 if ((caret.y < 0) || (caret.y > g_iScreenHeight))

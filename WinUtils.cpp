@@ -343,24 +343,39 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
     {
         BOOL isActive = FALSE;
         IUIAutomationTextRange* pCaretRange = nullptr;
-        if (SUCCEEDED(pTextPattern2->GetCaretRange(&isActive, &pCaretRange)) && pCaretRange)
+        hr = pTextPattern2->GetCaretRange(&isActive, &pCaretRange);
+        OutputDebugFormatA("UIA: TextPattern2 GetCaretRange hr=0x%08X isActive=%d pRange=%p\n",
+                           hr, (int)isActive, pCaretRange);
+        if (SUCCEEDED(hr) && pCaretRange)
         {
             bool found = GetPositionFromTextRange(pCaretRange, result);
             pCaretRange->Release();
             pTextPattern2->Release();
-            if (found) return true;
+            if (found)
+            {
+                OutputDebugFormatA("UIA: (via TextPattern2 GetCaretRange)\n");
+                return true;
+            }
+            OutputDebugFormatA("UIA: TextPattern2 GetCaretRange returned range but GetPositionFromTextRange failed\n");
         }
         else
             pTextPattern2->Release();
     }
+    else
+    {
+        OutputDebugFormatA("UIA: TextPattern2 not available (hr=0x%08X)\n", hr);
+    }
 
-    // Try TextPattern::GetSelection (v1 fallback — caret is a collapsed selection)
+    // EXPERIMENT: prefer v2, fall back to v1 if v2 didn't find anything
+    bool v2found = (result.y != 0);
+
+    // Try TextPattern::GetSelection (v1 fallback)
     IUIAutomationTextPattern* pTextPattern = nullptr;
     hr = pElement->GetCurrentPatternAs(UIA_TextPatternId,
              __uuidof(IUIAutomationTextPattern), (void**)&pTextPattern);
     if (SUCCEEDED(hr) && pTextPattern)
     {
-        bool found = false;
+        POINT v1result = {};
         IUIAutomationTextRangeArray* pSelections = nullptr;
         hr = pTextPattern->GetSelection(&pSelections);
         if (SUCCEEDED(hr) && pSelections)
@@ -373,7 +388,7 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
                 IUIAutomationTextRange* pRange = nullptr;
                 if (SUCCEEDED(pSelections->GetElement(0, &pRange)) && pRange)
                 {
-                    found = GetPositionFromTextRange(pRange, result);
+                    GetPositionFromTextRange(pRange, v1result);
                     pRange->Release();
                 }
             }
@@ -385,14 +400,20 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
         }
 
         pTextPattern->Release();
-        if (found)
+        if (v2found)
         {
-            OutputDebugFormatA("UIA: (via TextPattern v1 GetSelection)\n");
+            if (v1result.y != 0)
+                OutputDebugFormatA("UIA: (v1 also found (%d,%d) — not used, v2 wins)\n", v1result.x, v1result.y);
+        }
+        else if (v1result.y != 0)
+        {
+            result = v1result;
+            OutputDebugFormatA("UIA: (via TextPattern v1 GetSelection — v2 fallback)\n");
             return true;
         }
     }
 
-    return false;
+    return v2found;
 }
 
 POINT GetCaretPositionFromUIA()

@@ -438,6 +438,7 @@ static void SendShiftAltF1()
 POINT GetCaretPositionFromUIA()
 {
     POINT result = {};
+    static POINT s_lastResult = {};
 
     if (!g_pUIAutomation)
         return result;
@@ -450,16 +451,24 @@ POINT GetCaretPositionFromUIA()
     static DWORD s_pendingTogglePid = 0;
     static int   s_toggleState = 0;  // 0=idle, 1=first keystroke sent
 
+    // After toggle, wait for real user input before running UIA detection
+    if (g_bWaitForInputAfterToggle)
+    {
+        OutputDebugFormatA("UIA: waiting for user input after toggle\n");
+        return result;
+    }
+
     if (s_toggleState == 1)
     {
         // Second step: send Shift+Alt+F1 again to toggle screen reader OFF
         SendShiftAltF1();
-        OutputDebugFormatA("UIA: sending Shift+Alt+F1 (2/2, pid=%d) - accessibility primed, retrying...\n", s_pendingTogglePid);
+        OutputDebugFormatA("UIA: sending Shift+Alt+F1 (2/2, pid=%d) - accessibility primed, waiting for input...\n", s_pendingTogglePid);
         if (s_toggledPidCount < _countof(s_toggledPids))
             s_toggledPids[s_toggledPidCount++] = s_pendingTogglePid;
         s_pendingTogglePid = 0;
         s_toggleState = 0;
-        // Fall through to retry detection immediately
+        g_bWaitForInputAfterToggle = true;
+        return result;
     }
 
     // Throttle: UIA calls are expensive (especially FindFirst on large trees)
@@ -517,6 +526,7 @@ POINT GetCaretPositionFromUIA()
         {
             pFocused->Release();
             cachedResult = result;
+            s_lastResult = result;
             return result;
         }
         pFocused->Release();
@@ -526,8 +536,8 @@ POINT GetCaretPositionFromUIA()
         // find a different element (like the editor) and return wrong coordinates.
         if (hadTextPattern)
         {
-            OutputDebugFormatA("UIA: focused element had TextPattern but no rects (empty line?) — skipping subtree search\n");
-            return result;
+            OutputDebugFormatA("UIA: empty line — returning previous (%d,%d)\n", s_lastResult.x, s_lastResult.y);
+            return s_lastResult;
         }
     }
 
@@ -574,6 +584,7 @@ POINT GetCaretPositionFromUIA()
 
     pWindow->Release();
     cachedResult = result;
+    if (result.y != 0) s_lastResult = result;
     return result;
 }
 

@@ -799,6 +799,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             bool  bPrintableKey = mappedChar && std::isprint(mappedChar); // Checks if the mapped character is printable
 
             g_bCaretMightHaveMoved = true;
+            g_bWaitForInputAfterToggle = false;
 
             if( virtualKey == VK_ESCAPE )
                 g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
@@ -815,7 +816,10 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
     if (nCode == HC_ACTION)
     {
         if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN)
+        {
             g_bCaretMightHaveMoved = true;
+            g_bWaitForInputAfterToggle = false;
+        }
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }

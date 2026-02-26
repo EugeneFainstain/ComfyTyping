@@ -243,38 +243,39 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     return hWnd;
 }
 
-void MySetWindowPos(HWND hWnd, bool bShow)
+#ifdef USE_ANIMATION
+// Advance animation: compute current width from time, derive height/position, call SetWindowPos.
+// Does NOT re-evaluate the target — safe to call from the WM_PAINT loop.
+// bNoRedraw: true when called from WM_PAINT (we paint immediately after, so skip DWM repaint)
+//            false for steady-state positioning from the timer
+static void AdvanceAnimation(HWND hWnd, bool bNoRedraw = false)
 {
-    int targetW = bShow ? g_iEffectiveWidth : 0;
-    int targetH = bShow ? g_iMyHeight       : 0;
-
-    // Detect target change — start new animation from current position
-    if (targetW != g_iAnimToW || targetH != g_iAnimToH)
-    {
-        g_iAnimFromW  = g_iAnimWidth;
-        g_iAnimFromH  = g_iAnimHeight;
-        g_iAnimToW    = targetW;
-        g_iAnimToH    = targetH;
-        g_dwAnimStart = GetTickCount();
-        InvalidateRect(hWnd, NULL, FALSE); // Kick off the WM_PAINT animation loop
-    }
-
-    // Compute animation progress: t in [0..1]
-    DWORD elapsed = GetTickCount() - g_dwAnimStart;
-    float t = (ANIM_DURATION_MS > 0) ? (float)elapsed / ANIM_DURATION_MS : 1.0f;
+    // Compute animation progress: t in [0..1] using high-resolution timer
+    LARGE_INTEGER now, freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    float elapsedMs = (float)(now.QuadPart - g_llAnimStart) * 1000.0f / freq.QuadPart;
+    float t = (ANIM_DURATION_MS > 0) ? elapsedMs / ANIM_DURATION_MS : 1.0f;
     if (t > 1.0f) t = 1.0f;
 
-    // Ease-out: fast start, smooth stop
-    t = 1.0f - (1.0f - t) * (1.0f - t);
+    // Linear — no easing
 
-    g_iAnimWidth  = g_iAnimFromW + (int)((g_iAnimToW - g_iAnimFromW) * t);
-    g_iAnimHeight = g_iAnimFromH + (int)((g_iAnimToH - g_iAnimFromH) * t);
+    // Width is the sole driver — calculated from time
+    g_iAnimWidth = g_iAnimFromW + (int)((g_iAnimToW - g_iAnimFromW) * t);
+
+    // Height derived from width, preserving aspect ratio of the non-zero end
+    int refW = (g_iAnimToW > 0) ? g_iAnimToW : g_iAnimFromW;
+    int refH = (g_iAnimToW > 0) ? g_iAnimToH : g_iAnimFromH;
+    g_iAnimHeight = (refW > 0) ? refH * g_iAnimWidth / refW : 0;
+
+    UINT flags = SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE;
+    if (bNoRedraw) flags |= SWP_NOREDRAW; // Suppress DWM repaint — we paint right after
 
     if (g_iAnimWidth < 1 || g_iAnimHeight < 1)
     {
         // Fully hidden — park off-screen
         SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, 4 * g_iMyWindowY,
-                     0, 0, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
+                     0, 0, flags | SWP_NOSIZE);
     }
     else
     {
@@ -285,12 +286,48 @@ void MySetWindowPos(HWND hWnd, bool bShow)
         int animY   = centerY - g_iAnimHeight / 2;
 
         SetWindowPos(hWnd, HWND_TOPMOST, animX, animY,
-                     g_iAnimWidth, g_iAnimHeight,
-                     SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
+                     g_iAnimWidth, g_iAnimHeight, flags);
     }
 }
 
-void HideMyWindow(HWND hWnd) { MySetWindowPos(hWnd, false); }
+// Set animation target (if changed) and advance one frame.
+// Called from Show/HideMyWindow — the only path that evaluates g_iEffectiveWidth.
+void MySetWindowPos(HWND hWnd, bool bShow)
+{
+    int targetW = bShow ? g_iEffectiveWidth : 0;
+
+    // Target changed — start new animation from current width
+    if (targetW != g_iAnimToW)
+    {
+        g_iAnimFromW  = g_iAnimWidth;
+        g_iAnimFromH  = g_iAnimHeight;
+        g_iAnimToW    = targetW;
+        g_iAnimToH    = bShow ? g_iMyHeight : 0;
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        g_llAnimStart = now.QuadPart;
+        InvalidateRect(hWnd, NULL, FALSE); // Kick off the WM_PAINT animation loop
+    }
+
+    // Only advance from the timer when animation is done (steady-state positioning).
+    // During animation, WM_PAINT drives both AdvanceAnimation and painting in lockstep.
+    if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
+        AdvanceAnimation(hWnd);
+}
+#else
+void MySetWindowPos(HWND hWnd, bool bShow)
+{
+    if (bShow)
+        SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, g_iMyWindowY,
+                     g_iEffectiveWidth, g_iMyHeight,
+                     SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
+    else
+        SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, 4 * g_iMyWindowY,
+                     0, 0, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
+}
+#endif
+
+void HideMyWindow(HWND hWnd) { MySetWindowPos(hWnd, false); g_ptCaret = {}; }
 void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
@@ -309,8 +346,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     // Handling the messages
     switch (message)
     {
+#ifdef USE_ANIMATION
     case WM_ERASEBKGND:
         return 1; // Suppress background erase to prevent flicker during animation
+#endif
     case WM_SYSCOMMAND:
         if (wParam == SC_MINIMIZE) // Blocking the "minimize" functionality...
         {
@@ -342,9 +381,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 #ifdef INVALIDATE_ON_TIMER
         if (wParam == INVALIDATE_TIMER_ID) // Ensure it's our specific timer
         {
+#ifdef USE_ANIMATION
             // During animation, WM_PAINT drives itself — skip timer invalidation
             if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
                 InvalidateRect(hWnd, NULL, FALSE);
+#else
+            InvalidateRect(hWnd, NULL, FALSE);
+#endif
         }
 #endif
         if( wParam == CARET_TIMER_ID ) // Ensure it's our specific timer
@@ -541,12 +584,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     case WM_PAINT:
         {
+#ifdef USE_ANIMATION
+            // Advance animation BEFORE painting so content matches the new window size.
+            // (On zoom-in, SetWindowPos grows the window; painting after ensures no blank area.)
+            bool bAnimating = (g_iAnimWidth != g_iAnimToW || g_iAnimHeight != g_iAnimToH);
+            if (bAnimating)
+                AdvanceAnimation(hWnd, true); // true = SWP_NOREDRAW, we paint right after
+#endif
+
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
 
             if( g_rcContainer.right > g_rcContainer.left )
             {
                 int width = g_iEffectiveWidth, height = g_iScreenHeight / VERT_PORTION; // Define the region to capture
+                int fullW = width, fullH = height * ZOOM;
+
+#ifdef USE_CACHING_DC
+                // --- Cached frame buffer (intermediate between desktop and window) ---
+                static HDC     hCacheDC  = NULL;
+                static HBITMAP hCacheBmp = NULL;
+                static int     cacheW = 0, cacheH = 0;
+                static bool    bCacheValid = false;
+
+                if (!hCacheDC || cacheW != fullW || cacheH != fullH)
+                {
+                    if (hCacheDC)  { DeleteObject(hCacheBmp); DeleteDC(hCacheDC); }
+                    hCacheDC  = CreateCompatibleDC(hdc);
+                    hCacheBmp = CreateCompatibleBitmap(hdc, fullW, fullH);
+                    SelectObject(hCacheDC, hCacheBmp);
+                    cacheW = fullW; cacheH = fullH;
+                    bCacheValid = false;
+                }
+
+                // --- Coordinate update + frame grab (skipped during animation if cache is valid) ---
+#ifdef USE_ANIMATION
+                // Invalidate cache when zoom-in starts (fresh grab needed).
+                // Zoom-out keeps the stale cache (current desktop has no useful caret data).
+                static bool bWasAnimating = false;
+                if (bAnimating && !bWasAnimating && g_iAnimToW > 0)
+                    bCacheValid = false;
+                bWasAnimating = bAnimating;
+
+                if (!bAnimating || !bCacheValid)
+#endif // USE_ANIMATION
+#endif // USE_CACHING_DC
+                {
 
                 POINT ptCaret = g_ptCaret; // Calling GetCaretPositionFromAccessibility() here is too slow...
 
@@ -586,7 +669,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 //                         int iOffs = iSrcX_center - iSrcX_center_prev;
 //                         iSrcX = g_iSrcX + iOffs;
-                
+
                         // Note: iSrcX_right_edge < iSrcX_left_edge
 
                         {
@@ -627,7 +710,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 //                         iSrcX = g_iSrcX;
-// 
+//
 //                         if( iSrcX < iSrcX_left )
 //                             iSrcX = iSrcX_left;
 //                         else
@@ -637,13 +720,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 //                             iSrcX = g_iSrcX;
 
 //                             {
-// 
-// 
+//
+//
 //     //                             int iOffCenter_min = iSrcX_center - iSrcX_right;
 //     //                             int iOffCenter_max = iSrcX_center - iSrcX_left;
-//     // 
+//     //
 //     //                             iOffs = max( iOffCenter_min, min( iOffCenter_max, iOffCenter) );
-//     // 
+//     //
 //     //                             iSrcX = g_iSrcX + iOffCenter;
 //                             }
                     }
@@ -678,12 +761,38 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     RenderScaledCursor(hMemDC, hWnd, width, height); // Render to hMemDC
                 #endif
 
-                // Copy a portion of the desktop image to the window
+                // Grab desktop and blit to window
                 {
-                    HDC hScreenDC = GetDC(NULL); // Get the desktop DC
-                    StretchBlt(hdc, 0, 0, width, height*ZOOM, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
+                    HDC hScreenDC = GetDC(NULL);
+#ifdef USE_CACHING_DC
+                    StretchBlt(hCacheDC, 0, 0, fullW, fullH, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
+                    bCacheValid = true;
+#else
+                    StretchBlt(hdc, 0, 0, fullW, fullH, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
+#endif
                     ReleaseDC(NULL, hScreenDC);
                 }
+
+                } // end of coordinate update + grab block
+
+#ifdef USE_CACHING_DC
+                // --- Blit from cache to window ---
+                {
+#ifdef USE_ANIMATION
+                    int dstW = (g_iAnimWidth  > 0) ? g_iAnimWidth  : fullW;
+                    int dstH = (g_iAnimHeight > 0) ? g_iAnimHeight : fullH;
+                    if (dstW != fullW || dstH != fullH)
+                    {
+                        SetStretchBltMode(hdc, HALFTONE);
+                        StretchBlt(hdc, 0, 0, dstW, dstH, hCacheDC, 0, 0, fullW, fullH, SRCCOPY);
+                    }
+                    else
+                        BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
+#else
+                    BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
+#endif
+                }
+#endif // USE_CACHING_DC
 
                 #ifdef RENDER_CURSOR
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
@@ -692,12 +801,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             EndPaint(hWnd, &ps);
 
-            // Keep animation loop tight — request next frame immediately
+#ifdef USE_ANIMATION
+            // Request next animation frame (animation was already advanced before painting)
             if (g_iAnimWidth != g_iAnimToW || g_iAnimHeight != g_iAnimToH)
-            {
-                MySetWindowPos(hWnd, g_iAnimToW > 0);
                 InvalidateRect(hWnd, NULL, FALSE);
-            }
+#endif
         }
         break;
 //    case WM_LBUTTONDOWN: // Can't do anything on button down - because the input focus is on our window. Improve later.

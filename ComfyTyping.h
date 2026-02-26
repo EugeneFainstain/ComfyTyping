@@ -22,6 +22,8 @@
 #define CARET_TIMER_ID       1002   // Unique timer ID
 #define CARET_TIMER_INTERVAL 500    // DEBUG: normally 1ms, slowed for tracing
 
+//#define USE_ANIMATION
+//#define USE_CACHING_DC
 #define ANIM_DURATION_MS     500    // Show/hide/resize animation duration
 
 #define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )

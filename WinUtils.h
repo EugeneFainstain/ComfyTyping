@@ -50,7 +50,7 @@ MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK
 // Animation state for show/hide/resize
 MYGLOBAL(int          , g_iAnimWidth  , 0    ); // current animated width
 MYGLOBAL(int          , g_iAnimHeight , 0    ); // current animated height
-MYGLOBAL(DWORD        , g_dwAnimStart , 0    ); // GetTickCount() when animation began
+MYGLOBAL(LONGLONG     , g_llAnimStart , 0    ); // QPC tick when animation began
 MYGLOBAL(int          , g_iAnimFromW  , 0    ); // width at animation start
 MYGLOBAL(int          , g_iAnimFromH  , 0    ); // height at animation start
 MYGLOBAL(int          , g_iAnimToW    , 0    ); // target width

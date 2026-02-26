@@ -243,12 +243,53 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
     return hWnd;
 }
 
-//bool g_bWindowAtTheBottom = false;
 void MySetWindowPos(HWND hWnd, bool bShow)
-     { SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, (bShow ? 1 : 4) * g_iMyWindowY, g_iEffectiveWidth, g_iMyHeight, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE); }
+{
+    int targetW = bShow ? g_iEffectiveWidth : 0;
+    int targetH = bShow ? g_iMyHeight       : 0;
 
-// void HideMyWindow(HWND hWnd) { if(!g_bWindowAtTheBottom) MySetWindowPos(hWnd, false); g_bWindowAtTheBottom = true; }
-// void ShowMyWindow(HWND hWnd) {                           MySetWindowPos(hWnd, true ); g_bWindowAtTheBottom = false; }
+    // Detect target change — start new animation from current position
+    if (targetW != g_iAnimToW || targetH != g_iAnimToH)
+    {
+        g_iAnimFromW  = g_iAnimWidth;
+        g_iAnimFromH  = g_iAnimHeight;
+        g_iAnimToW    = targetW;
+        g_iAnimToH    = targetH;
+        g_dwAnimStart = GetTickCount();
+        InvalidateRect(hWnd, NULL, FALSE); // Kick off the WM_PAINT animation loop
+    }
+
+    // Compute animation progress: t in [0..1]
+    DWORD elapsed = GetTickCount() - g_dwAnimStart;
+    float t = (ANIM_DURATION_MS > 0) ? (float)elapsed / ANIM_DURATION_MS : 1.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    // Ease-out: fast start, smooth stop
+    t = 1.0f - (1.0f - t) * (1.0f - t);
+
+    g_iAnimWidth  = g_iAnimFromW + (int)((g_iAnimToW - g_iAnimFromW) * t);
+    g_iAnimHeight = g_iAnimFromH + (int)((g_iAnimToH - g_iAnimFromH) * t);
+
+    if (g_iAnimWidth < 1 || g_iAnimHeight < 1)
+    {
+        // Fully hidden — park off-screen
+        SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, 4 * g_iMyWindowY,
+                     0, 0, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
+    }
+    else
+    {
+        // Center the animated rect around the eventual full-size center
+        int centerX = g_iMyWindowX + g_iEffectiveWidth / 2;
+        int centerY = g_iMyWindowY + g_iMyHeight / 2;
+        int animX   = centerX - g_iAnimWidth  / 2;
+        int animY   = centerY - g_iAnimHeight / 2;
+
+        SetWindowPos(hWnd, HWND_TOPMOST, animX, animY,
+                     g_iAnimWidth, g_iAnimHeight,
+                     SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
 void HideMyWindow(HWND hWnd) { MySetWindowPos(hWnd, false); }
 void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
 //
@@ -268,6 +309,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     // Handling the messages
     switch (message)
     {
+    case WM_ERASEBKGND:
+        return 1; // Suppress background erase to prevent flicker during animation
     case WM_SYSCOMMAND:
         if (wParam == SC_MINIMIZE) // Blocking the "minimize" functionality...
         {
@@ -299,7 +342,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 #ifdef INVALIDATE_ON_TIMER
         if (wParam == INVALIDATE_TIMER_ID) // Ensure it's our specific timer
         {
-            InvalidateRect(hWnd, NULL, FALSE);
+            // During animation, WM_PAINT drives itself — skip timer invalidation
+            if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
+                InvalidateRect(hWnd, NULL, FALSE);
         }
 #endif
         if( wParam == CARET_TIMER_ID ) // Ensure it's our specific timer
@@ -646,6 +691,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
 
             EndPaint(hWnd, &ps);
+
+            // Keep animation loop tight — request next frame immediately
+            if (g_iAnimWidth != g_iAnimToW || g_iAnimHeight != g_iAnimToH)
+            {
+                MySetWindowPos(hWnd, g_iAnimToW > 0);
+                InvalidateRect(hWnd, NULL, FALSE);
+            }
         }
         break;
 //    case WM_LBUTTONDOWN: // Can't do anything on button down - because the input focus is on our window. Improve later.

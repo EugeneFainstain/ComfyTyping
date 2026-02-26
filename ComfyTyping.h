@@ -20,11 +20,19 @@
 #endif
 
 #define CARET_TIMER_ID       1002   // Unique timer ID
-#define CARET_TIMER_INTERVAL 500    // DEBUG: normally 1ms, slowed for tracing
+#define CARET_TIMER_INTERVAL 1000   // Background poll (not the main driver; event-driven detection handles most updates)
 
 //#define USE_ANIMATION
 //#define USE_CACHING_DC
 #define ANIM_DURATION_MS     500    // Show/hide/resize animation duration
+
+// Event-driven caret detection: hooks PostMessage instead of setting globals
+#define WM_APP_DETECT_CARET  (WM_APP + 1)
+#define DETECT_REASON_KEY    0      // lParam = virtual key code
+#define DETECT_REASON_MOUSE  1
+#define DETECT_REASON_SETTLE 2      // fired by settle timer to re-detect until caret stabilizes
+#define SETTLE_TIMER_ID      1003
+#define SETTLE_TIMER_MS      15
 
 #define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )
 #define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )

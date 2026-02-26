@@ -329,6 +329,205 @@ void MySetWindowPos(HWND hWnd, bool bShow)
 
 void HideMyWindow(HWND hWnd) { MySetWindowPos(hWnd, false); g_ptCaret = {}; }
 void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
+
+// ---------------------------------------------------------------------------
+// Detect caret + container, update globals, optionally show/hide window.
+// Called from WM_APP_DETECT_CARET (event-driven) and CARET_TIMER (periodic).
+// bShowHide=false: detect only (caller will show/hide after painting).
+// ---------------------------------------------------------------------------
+static void DetectCaretAndUpdateWindow(HWND hWnd, bool bShowHide = true)
+{
+    if (!(g_hForegroundWindow = GetForegroundWindow()))
+        return; // can be NULL during focus transitions
+
+    g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow);
+    g_bAllowOptimizations = !KEY_TOGGLED(VK_SCROLL);
+
+    // Detect foreground window change
+    static HWND hPrevForeground = nullptr;
+    if (g_hForegroundWindow != hPrevForeground)
+    {
+        g_bCaretMightHaveMoved = true;
+        hPrevForeground = g_hForegroundWindow;
+    }
+
+    // Only run detection when something might have changed
+    if (g_bCaretMightHaveMoved || !g_bAllowOptimizations)
+    {
+        POINT caret = {};
+        HWND  hwndCaretOwner = nullptr;
+        bool bCaretFromAccessibility = false;
+        int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
+
+        OutputDebugFormatA("======== APP: %s ========\n", g_szAppExeName);
+
+        // --- Caret detection chain ---
+        if (methods & CARET_GTHI)
+        {
+            caret = GetCaretPosition(&hwndCaretOwner);
+            if (caret.y != 0)
+                OutputDebugFormatA("  Caret [GuiThreadInfo]: (%d,%d)\n", caret.x, caret.y);
+            else
+                OutputDebugFormatA("  Caret [GuiThreadInfo]: not found\n");
+        }
+        else
+            OutputDebugFormatA("  Caret [GuiThreadInfo]: skipped\n");
+
+        if (methods & CARET_IACC)
+        {
+            if (caret.y == 0)
+            {
+                HWND hwndAccCaret = nullptr;
+                caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
+                bCaretFromAccessibility = true;
+                if (!hwndCaretOwner && hwndAccCaret)
+                    hwndCaretOwner = hwndAccCaret;
+                if (caret.y != 0)
+                    OutputDebugFormatA("  Caret [IAccessible]  : (%d,%d)\n", caret.x, caret.y);
+                else
+                    OutputDebugFormatA("  Caret [IAccessible]  : not found\n");
+            }
+            else
+                OutputDebugFormatA("  Caret [IAccessible]  : -\n");
+        }
+        else
+            OutputDebugFormatA("  Caret [IAccessible]  : skipped\n");
+
+        if (methods & CARET_UIA)
+        {
+            if (caret.y == 0)
+            {
+                caret = GetCaretPositionFromUIA();
+                if (caret.y != 0)
+                    OutputDebugFormatA("  Caret [UIA]          : (%d,%d)\n", caret.x, caret.y);
+                else
+                    OutputDebugFormatA("  Caret [UIA]          : not found\n");
+            }
+            else
+                OutputDebugFormatA("  Caret [UIA]          : -\n");
+        }
+        else
+            OutputDebugFormatA("  Caret [UIA]          : skipped\n");
+
+        g_bCaretFromAccessibility = bCaretFromAccessibility;
+
+        // --- Container detection (try all enabled, pick narrowest) ---
+        if (caret.y != 0)
+        {
+            HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
+            if (!hRoot) hRoot = g_hForegroundWindow;
+
+            int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
+            RECT rcBest = {};
+            int  bestWidth = INT_MAX;
+            const char* bestName = "fallback";
+
+            // Method 1: HOOK
+            if (containerMethods & CONTAINER_HOOK)
+            {
+                if (g_hFocusedChildWnd)
+                {
+                    RECT rc;
+                    GetWindowRect(g_hFocusedChildWnd, &rc);
+                    int w = rc.right - rc.left;
+                    char cls[64] = {};
+                    GetClassNameA(g_hFocusedChildWnd, cls, sizeof(cls));
+                    OutputDebugFormatA("  Container [Hook]     : '%s' (%d,%d,%d,%d) %dx%d\n",
+                                       cls, rc.left, rc.top, rc.right, rc.bottom,
+                                       w, rc.bottom - rc.top);
+                    if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Hook"; }
+                }
+                else
+                    OutputDebugFormatA("  Container [Hook]     : no focused child\n");
+            }
+            else
+                OutputDebugFormatA("  Container [Hook]     : skipped\n");
+
+            // Method 2: ENUM
+            if (containerMethods & CONTAINER_ENUM)
+            {
+                int childCount = 0;
+                HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y, &childCount);
+                if (hChild)
+                {
+                    RECT rc;
+                    GetWindowRect(hChild, &rc);
+                    int w = rc.right - rc.left;
+                    char cls[64] = {};
+                    GetClassNameA(hChild, cls, sizeof(cls));
+                    OutputDebugFormatA("  Container [Enum]     : '%s' (%d,%d,%d,%d) %dx%d\n",
+                                       cls, rc.left, rc.top, rc.right, rc.bottom,
+                                       w, rc.bottom - rc.top);
+                    if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Enum"; }
+                }
+                else
+                    OutputDebugFormatA("  Container [Enum]     : no match (%d children)\n", childCount);
+            }
+            else
+                OutputDebugFormatA("  Container [Enum]     : skipped\n");
+
+            // Method 3: UIA ElementFromPoint
+            if (containerMethods & CONTAINER_UIA)
+            {
+                RECT rc = GetContainerRectFromUIA(caret.x, caret.y);
+                if (rc.right != 0)
+                {
+                    int w = rc.right - rc.left;
+                    OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
+                                       rc.left, rc.top, rc.right, rc.bottom,
+                                       w, rc.bottom - rc.top);
+                    if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
+                }
+                else
+                    OutputDebugFormatA("  Container [UIA]      : not found\n");
+            }
+            else
+                OutputDebugFormatA("  Container [UIA]      : skipped\n");
+
+            // Fallback: use foreground window rect
+            if (bestWidth == INT_MAX)
+            {
+                GetWindowRect(hRoot, &rcBest);
+                OutputDebugFormatA("  Container [Fallback] : (%d,%d,%d,%d) %dx%d\n",
+                                   rcBest.left, rcBest.top, rcBest.right, rcBest.bottom,
+                                   rcBest.right - rcBest.left, rcBest.bottom - rcBest.top);
+            }
+            else
+                OutputDebugFormatA("  => Winner: %s (%d wide)\n", bestName, bestWidth);
+
+            g_rcContainer = rcBest;
+
+            // Shrink overlay width when container is narrower than the default capture area
+            int containerWidth = rcBest.right - rcBest.left;
+            int newEffective = min((int)g_iMyWidth, containerWidth * ZOOM);
+            if (newEffective != g_iEffectiveWidth)
+            {
+                g_iEffectiveWidth = newEffective;
+                g_iMyWindowX = (g_iScreenWidth - g_iEffectiveWidth) / 2;
+            }
+        }
+
+        if ((caret.y < 0) || (caret.y > g_iScreenHeight))
+            caret.x = caret.y = 0;
+
+        if (g_hForegroundWindow != hWnd)
+            g_ptCaret = caret;
+
+        g_bCaretMightHaveMoved = false;
+    }
+
+    if (bShowHide)
+    {
+        static bool bWindowAtTheBottom = false;
+
+        if (((g_ptCaret.y != 0) && (g_bTemporarilyHideMyWindow == false)) ||
+            ((g_hForegroundWindow == hWnd) && (g_bTemporarilyHideMyWindow == false)))
+            ShowMyWindow(hWnd);
+        else
+            HideMyWindow(hWnd);
+    }
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -390,192 +589,97 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 #endif
         }
 #endif
-        if( wParam == CARET_TIMER_ID ) // Ensure it's our specific timer
-        if( g_hForegroundWindow = GetForegroundWindow() ) // g_hForegroundWindow can be NULL during focus transitions
+        if (wParam == CARET_TIMER_ID)
         {
-            g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
-            g_bAllowOptimizations = !KEY_TOGGLED(VK_SCROLL); // SCROLL_LOCK lit = no optimizations
+            if (g_ptCaret.y != 0) // Only run after event-driven detection has set a valid caret
+                DetectCaretAndUpdateWindow(hWnd);
+        }
+        if (wParam == SETTLE_TIMER_ID)
+        {
+            KillTimer(hWnd, SETTLE_TIMER_ID);
+            PostMessage(hWnd, WM_APP_DETECT_CARET, DETECT_REASON_SETTLE, 0);
+        }
+        break;
+    case WM_APP_DETECT_CARET:
+        {
+            static POINT ptPrevSettle = {};
+            static HWND  hSettleFG = nullptr;
+            static int   iSettleCount = 0;
+            static LARGE_INTEGER llSettlePrev = {};
 
-            // Detect foreground window change
-            static HWND hPrevForeground = nullptr;
-            if (g_hForegroundWindow != hPrevForeground)
+            // --- Process event flags (key/mouse only, not settle ticks) ---
+            if (wParam == DETECT_REASON_KEY)
             {
-                g_bCaretMightHaveMoved = true;
-                hPrevForeground = g_hForegroundWindow;
+                DWORD vk = (DWORD)lParam;
+                UINT  mappedChar    = MapVirtualKey(vk, MAPVK_VK_TO_CHAR);
+                bool  bPrintableKey = mappedChar && std::isprint(mappedChar);
+
+                g_bWaitForInputAfterToggle = false;
+
+                if (vk == VK_ESCAPE)
+                    g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
+                else if (bPrintableKey || vk == VK_DELETE || vk == VK_BACK)
+                    g_bTemporarilyHideMyWindow = false;
+            }
+            else if (wParam == DETECT_REASON_MOUSE)
+            {
+                g_bWaitForInputAfterToggle = false;
             }
 
-            // Only run detection when something might have changed
-            if (g_bCaretMightHaveMoved || !g_bAllowOptimizations)
+            bool bSettling = (wParam == DETECT_REASON_SETTLE);
+
+            if (!bSettling)
             {
-                POINT caret = {};
-                HWND  hwndCaretOwner = nullptr;  // filled by GetCaretPosition (gti.hwndCaret)
-                bool bCaretFromAccessibility = false;
-                int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
-
-                OutputDebugFormatA("======== APP: %s ========\n", g_szAppExeName);
-
-                // --- Caret detection chain ---
-                if (methods & CARET_GTHI)
-                {
-                    caret = GetCaretPosition(&hwndCaretOwner);
-                    if (caret.y != 0)
-                        OutputDebugFormatA("  Caret [GuiThreadInfo]: (%d,%d)\n", caret.x, caret.y);
-                    else
-                        OutputDebugFormatA("  Caret [GuiThreadInfo]: not found\n");
-                }
-                else
-                    OutputDebugFormatA("  Caret [GuiThreadInfo]: skipped\n");
-
-                if (methods & CARET_IACC)
-                {
-                    if (caret.y == 0)
-                    {
-                        HWND hwndAccCaret = nullptr;
-                        caret = GetCaretPositionFromAccessibility(&hwndAccCaret);
-                        bCaretFromAccessibility = true;
-                        if (!hwndCaretOwner && hwndAccCaret)
-                            hwndCaretOwner = hwndAccCaret;
-                        if (caret.y != 0)
-                            OutputDebugFormatA("  Caret [IAccessible]  : (%d,%d)\n", caret.x, caret.y);
-                        else
-                            OutputDebugFormatA("  Caret [IAccessible]  : not found\n");
-                    }
-                    else
-                        OutputDebugFormatA("  Caret [IAccessible]  : -\n");
-                }
-                else
-                    OutputDebugFormatA("  Caret [IAccessible]  : skipped\n");
-
-                if (methods & CARET_UIA)
-                {
-                    if (caret.y == 0)
-                    {
-                        caret = GetCaretPositionFromUIA();
-                        if (caret.y != 0)
-                            OutputDebugFormatA("  Caret [UIA]          : (%d,%d)\n", caret.x, caret.y);
-                        else
-                            OutputDebugFormatA("  Caret [UIA]          : not found\n");
-                    }
-                    else
-                        OutputDebugFormatA("  Caret [UIA]          : -\n");
-                }
-                else
-                    OutputDebugFormatA("  Caret [UIA]          : skipped\n");
-
-                g_bCaretFromAccessibility = bCaretFromAccessibility;
-
-                // --- Container detection (try all enabled, pick narrowest) ---
-                if (caret.y != 0)
-                {
-                    HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
-                    if (!hRoot) hRoot = g_hForegroundWindow;
-
-                    int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
-                    RECT rcBest = {};
-                    int  bestWidth = INT_MAX;
-                    const char* bestName = "fallback";
-
-                    // Method 1: HOOK
-                    if (containerMethods & CONTAINER_HOOK)
-                    {
-                        if (g_hFocusedChildWnd)
-                        {
-                            RECT rc;
-                            GetWindowRect(g_hFocusedChildWnd, &rc);
-                            int w = rc.right - rc.left;
-                            char cls[64] = {};
-                            GetClassNameA(g_hFocusedChildWnd, cls, sizeof(cls));
-                            OutputDebugFormatA("  Container [Hook]     : '%s' (%d,%d,%d,%d) %dx%d\n",
-                                               cls, rc.left, rc.top, rc.right, rc.bottom,
-                                               w, rc.bottom - rc.top);
-                            if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Hook"; }
-                        }
-                        else
-                            OutputDebugFormatA("  Container [Hook]     : no focused child\n");
-                    }
-                    else
-                        OutputDebugFormatA("  Container [Hook]     : skipped\n");
-
-                    // Method 2: ENUM
-                    if (containerMethods & CONTAINER_ENUM)
-                    {
-                        int childCount = 0;
-                        HWND hChild = FindSmallestChildContainingXY(hRoot, caret.x, caret.y, &childCount);
-                        if (hChild)
-                        {
-                            RECT rc;
-                            GetWindowRect(hChild, &rc);
-                            int w = rc.right - rc.left;
-                            char cls[64] = {};
-                            GetClassNameA(hChild, cls, sizeof(cls));
-                            OutputDebugFormatA("  Container [Enum]     : '%s' (%d,%d,%d,%d) %dx%d\n",
-                                               cls, rc.left, rc.top, rc.right, rc.bottom,
-                                               w, rc.bottom - rc.top);
-                            if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Enum"; }
-                        }
-                        else
-                            OutputDebugFormatA("  Container [Enum]     : no match (%d children)\n", childCount);
-                    }
-                    else
-                        OutputDebugFormatA("  Container [Enum]     : skipped\n");
-
-                    // Method 3: UIA ElementFromPoint
-                    if (containerMethods & CONTAINER_UIA)
-                    {
-                        RECT rc = GetContainerRectFromUIA(caret.x, caret.y);
-                        if (rc.right != 0)
-                        {
-                            int w = rc.right - rc.left;
-                            OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
-                                               rc.left, rc.top, rc.right, rc.bottom,
-                                               w, rc.bottom - rc.top);
-                            if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
-                        }
-                        else
-                            OutputDebugFormatA("  Container [UIA]      : not found\n");
-                    }
-                    else
-                        OutputDebugFormatA("  Container [UIA]      : skipped\n");
-
-                    // Fallback: use foreground window rect
-                    if (bestWidth == INT_MAX)
-                    {
-                        GetWindowRect(hRoot, &rcBest);
-                        OutputDebugFormatA("  Container [Fallback] : (%d,%d,%d,%d) %dx%d\n",
-                                           rcBest.left, rcBest.top, rcBest.right, rcBest.bottom,
-                                           rcBest.right - rcBest.left, rcBest.bottom - rcBest.top);
-                    }
-                    else
-                        OutputDebugFormatA("  => Winner: %s (%d wide)\n", bestName, bestWidth);
-
-                    g_rcContainer = rcBest;
-
-                    // Shrink overlay width when container is narrower than the default capture area
-                    int containerWidth = rcBest.right - rcBest.left;
-                    int newEffective = min((int)g_iMyWidth, containerWidth * ZOOM);
-                    if (newEffective != g_iEffectiveWidth)
-                    {
-                        g_iEffectiveWidth = newEffective;
-                        g_iMyWindowX = (g_iScreenWidth - g_iEffectiveWidth) / 2;
-                    }
-                }
-
-                if ((caret.y < 0) || (caret.y > g_iScreenHeight))
-                    caret.x = caret.y = 0;
-
-                if( g_hForegroundWindow != hWnd ) // Don't update the caret position if our window is in focus...
-                    g_ptCaret = caret;
-
-                g_bCaretMightHaveMoved = false;
+                // Key/mouse event: always defer detection by 15ms
+                hSettleFG = g_hForegroundWindow;
+                ptPrevSettle = g_ptCaret;
+                iSettleCount = 0;
+                QueryPerformanceCounter(&llSettlePrev);
+                SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
             }
-
-            static bool bWindowAtTheBottom = false;
-
-            if( ((g_ptCaret.y != 0) && (g_bTemporarilyHideMyWindow == false)) ||
-                ((g_hForegroundWindow == hWnd) && (g_bTemporarilyHideMyWindow == false)) )
-                ShowMyWindow(hWnd); // Make sure we are still topmost (needed to be above the taskbar)
             else
-                HideMyWindow(hWnd); // This is now getting called on every WM_TIMER event... hmmm...
+            {
+                // Settle tick: detect + paint + show
+                g_bCaretMightHaveMoved = true;
+                LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
+                QueryPerformanceCounter(&llDetectStart);
+                DetectCaretAndUpdateWindow(hWnd, false);
+                QueryPerformanceCounter(&llDetectEnd);
+                QueryPerformanceFrequency(&llDetectFreq);
+                float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
+
+                LARGE_INTEGER now, freq;
+                QueryPerformanceCounter(&now);
+                QueryPerformanceFrequency(&freq);
+                float deltaMs = (float)(now.QuadPart - llSettlePrev.QuadPart) * 1000.0f / freq.QuadPart;
+                llSettlePrev = now;
+
+                // Keep going if caret moved, up to 50 iterations
+                if ((g_ptCaret.x != ptPrevSettle.x || g_ptCaret.y != ptPrevSettle.y)
+                    && ++iSettleCount < 50)
+                {
+                    OutputDebugFormatA("  Settle #%d  delta=%.1fms  detect=%.2fms: (%d,%d) -> (%d,%d)\n",
+                                       iSettleCount, deltaMs, detectMs,
+                                       ptPrevSettle.x, ptPrevSettle.y,
+                                       g_ptCaret.x, g_ptCaret.y);
+                    ptPrevSettle = g_ptCaret;
+                    SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
+                }
+                else
+                {
+                    // Settled: paint + show only with final stable coordinates
+                    OutputDebugFormatA("  Settled after %d iteration(s)  delta=%.1fms  detect=%.2fms at (%d,%d)\n",
+                                       iSettleCount, deltaMs, detectMs,
+                                       g_ptCaret.x, g_ptCaret.y);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    UpdateWindow(hWnd);
+                    if (((g_ptCaret.y != 0) && !g_bTemporarilyHideMyWindow) ||
+                        ((g_hForegroundWindow == hWnd) && !g_bTemporarilyHideMyWindow))
+                        ShowMyWindow(hWnd);
+                    else
+                        HideMyWindow(hWnd);
+                }
+            }
         }
         break;
     case WM_MOVING:
@@ -949,37 +1053,22 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    if (nCode == HC_ACTION)
+    if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
     {
-        KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *)lParam;
-        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
-        {
-            DWORD virtualKey    = pKeyBoard->vkCode;
-            UINT  mappedChar    = MapVirtualKey(virtualKey, MAPVK_VK_TO_CHAR); // maps the virtual key to a character
-            bool  bPrintableKey = mappedChar && std::isprint(mappedChar); // Checks if the mapped character is printable
-
-            g_bCaretMightHaveMoved = true;
-            g_bWaitForInputAfterToggle = false;
-
-            if( virtualKey == VK_ESCAPE )
-                g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
-            else
-            if( bPrintableKey || virtualKey == VK_DELETE || virtualKey == VK_BACK )
-                g_bTemporarilyHideMyWindow = false;
-        }
+        KBDLLHOOKSTRUCT *pKB = (KBDLLHOOKSTRUCT *)lParam;
+        PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                    DETECT_REASON_KEY, (LPARAM)pKB->vkCode);
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
 LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    if (nCode == HC_ACTION)
+    if (nCode == HC_ACTION &&
+        (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN))
     {
-        if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN)
-        {
-            g_bCaretMightHaveMoved = true;
-            g_bWaitForInputAfterToggle = false;
-        }
+        PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                    DETECT_REASON_MOUSE, 0);
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }

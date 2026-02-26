@@ -23,7 +23,7 @@
 #define CARET_TIMER_INTERVAL 1000   // Background poll (not the main driver; event-driven detection handles most updates)
 
 //#define USE_ANIMATION
-//#define USE_CACHING_DC
+#define USE_CACHING_DC
 #define ANIM_DURATION_MS     500    // Show/hide/resize animation duration
 
 // Event-driven caret detection: hooks PostMessage instead of setting globals

@@ -631,6 +631,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (!bSettling)
             {
                 // Key/mouse event: always defer detection by 15ms
+                g_bSettling = true;
                 hSettleFG = g_hForegroundWindow;
                 ptPrevSettle = g_ptCaret;
                 iSettleCount = 0;
@@ -668,6 +669,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 else
                 {
                     // Settled: paint + show only with final stable coordinates
+                    g_bSettling = false;
                     OutputDebugFormatA("  Settled after %d iteration(s)  delta=%.1fms  detect=%.2fms at (%d,%d)\n",
                                        iSettleCount, deltaMs, detectMs,
                                        g_ptCaret.x, g_ptCaret.y);
@@ -721,7 +723,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     bCacheValid = false;
                 }
 
-                // --- Coordinate update + frame grab (skipped during animation if cache is valid) ---
+                // --- Coordinate update + frame grab (skipped during settling/animation if cache is valid) ---
+                if (g_bSettling && bCacheValid)
+                    goto skip_grab; // keep showing cached frame while caret settles
 #ifdef USE_ANIMATION
                 // Invalidate cache when zoom-in starts (fresh grab needed).
                 // Zoom-out keeps the stale cache (current desktop has no useful caret data).
@@ -878,6 +882,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 }
 
                 } // end of coordinate update + grab block
+#ifdef USE_CACHING_DC
+                skip_grab:
+#endif
 
 #ifdef USE_CACHING_DC
                 // --- Blit from cache to window ---

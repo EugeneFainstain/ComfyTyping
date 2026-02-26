@@ -46,6 +46,7 @@ MYGLOBAL(RECT         , g_rcContainer     , {});
 MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to detect on first tick
 MYGLOBAL(bool         , g_bWaitForInputAfterToggle, false); // set after VSCode screen reader toggle; cleared by hooks
 MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK is lit
+MYGLOBAL(bool         , g_bSettling           , false); // true while settle loop runs; suppresses desktop grab
 
 // Animation state for show/hide/resize
 MYGLOBAL(int          , g_iAnimWidth  , 0    ); // current animated width

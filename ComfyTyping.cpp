@@ -306,6 +306,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if( g_hForegroundWindow = GetForegroundWindow() ) // g_hForegroundWindow can be NULL during focus transitions
         {
             g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow); // Update DPI scaling factor
+            g_bAllowOptimizations = !KEY_TOGGLED(VK_SCROLL); // SCROLL_LOCK lit = no optimizations
 
             // Detect foreground window change
             static HWND hPrevForeground = nullptr;
@@ -316,7 +317,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
 
             // Only run detection when something might have changed
-            if (g_bCaretMightHaveMoved)
+            if (g_bCaretMightHaveMoved || !g_bAllowOptimizations)
             {
                 POINT caret = {};
                 HWND  hwndCaretOwner = nullptr;  // filled by GetCaretPosition (gti.hwndCaret)

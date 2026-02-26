@@ -78,7 +78,7 @@ static int GetMethodsForWindow(HWND hwnd)
     static HWND  cachedHwnd = nullptr;
     static int   cachedMethods = METHOD_ALL;
 
-    if (hwnd == cachedHwnd)
+    if (g_bAllowOptimizations && hwnd == cachedHwnd)
         return cachedMethods;
 
     cachedHwnd = hwnd;
@@ -335,14 +335,17 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
 }
 
 // Try to get caret position from a UIA element - tries TextPattern2 then TextPattern
-static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result)
+// Sets *pHadTextPattern = true if the element exposed a TextPattern (even if no rects)
+static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result, bool* pHadTextPattern = nullptr)
 {
+    if (pHadTextPattern) *pHadTextPattern = false;
     // Try TextPattern2::GetCaretRange first (best method)
     IUIAutomationTextPattern2* pTextPattern2 = nullptr;
     HRESULT hr = pElement->GetCurrentPatternAs(UIA_TextPattern2Id,
                      __uuidof(IUIAutomationTextPattern2), (void**)&pTextPattern2);
     if (SUCCEEDED(hr) && pTextPattern2)
     {
+        if (pHadTextPattern) *pHadTextPattern = true;
         BOOL isActive = FALSE;
         IUIAutomationTextRange* pCaretRange = nullptr;
         hr = pTextPattern2->GetCaretRange(&isActive, &pCaretRange);
@@ -377,6 +380,7 @@ static bool TryGetCaretFromElement(IUIAutomationElement* pElement, POINT& result
              __uuidof(IUIAutomationTextPattern), (void**)&pTextPattern);
     if (SUCCEEDED(hr) && pTextPattern)
     {
+        if (pHadTextPattern) *pHadTextPattern = true;
         POINT v1result = {};
         IUIAutomationTextRangeArray* pSelections = nullptr;
         hr = pTextPattern->GetSelection(&pSelections);
@@ -450,20 +454,25 @@ POINT GetCaretPositionFromUIA()
     {
         // Second step: send Shift+Alt+F1 again to toggle screen reader OFF
         SendShiftAltF1();
-        OutputDebugFormatA("UIA: sending Shift+Alt+F1 (2/2, pid=%d) - accessibility primed\n", s_pendingTogglePid);
+        OutputDebugFormatA("UIA: sending Shift+Alt+F1 (2/2, pid=%d) - accessibility primed, retrying...\n", s_pendingTogglePid);
         if (s_toggledPidCount < _countof(s_toggledPids))
             s_toggledPids[s_toggledPidCount++] = s_pendingTogglePid;
         s_pendingTogglePid = 0;
         s_toggleState = 0;
-        return result;  // skip this tick, next call will get proper results
+        // Fall through to retry detection immediately
     }
 
     // Throttle: UIA calls are expensive (especially FindFirst on large trees)
     // COM/UIA creates worker threads on each call - must limit aggressively
     static DWORD lastCallTime = 0;
     static POINT cachedResult = {};
+    if (!g_bAllowOptimizations)
+    {
+        cachedResult = {};
+        lastCallTime = 0;
+    }
     DWORD now = GetTickCount();
-    if (now - lastCallTime < 100)  // Max ~10 calls/sec
+    if (g_bAllowOptimizations && now - lastCallTime < 100)  // Max ~10 calls/sec
         return cachedResult;
     lastCallTime = now;
 
@@ -503,13 +512,23 @@ POINT GetCaretPositionFromUIA()
             }
         }
 
-        if (TryGetCaretFromElement(pFocused, result))
+        bool hadTextPattern = false;
+        if (TryGetCaretFromElement(pFocused, result, &hadTextPattern))
         {
             pFocused->Release();
             cachedResult = result;
             return result;
         }
         pFocused->Release();
+
+        // If the focused element had a TextPattern but couldn't resolve coordinates
+        // (e.g. empty line), don't fall through to the subtree search — it would
+        // find a different element (like the editor) and return wrong coordinates.
+        if (hadTextPattern)
+        {
+            OutputDebugFormatA("UIA: focused element had TextPattern but no rects (empty line?) — skipping subtree search\n");
+            return result;
+        }
     }
 
     // 2. Try from the foreground window's root element - search entire window tree
@@ -615,17 +634,41 @@ RECT GetContainerRectFromUIA(int x, int y)
     RECT result = {};
     if (!g_pUIAutomation) return result;
 
+    // Start at the caret position, then walk left to find the parent container.
+    // ElementFromPoint returns the deepest element — calling it on the left edge
+    // of the current rect walks up to the enclosing container.
     POINT pt = { x, y };
-    IUIAutomationElement* pElement = nullptr;
-    HRESULT hr = g_pUIAutomation->ElementFromPoint(pt, &pElement);
-    if (FAILED(hr) || !pElement) return result;
+    RECT prevRc = {};
 
-    RECT rc;
-    hr = pElement->get_CurrentBoundingRectangle(&rc);
-    if (SUCCEEDED(hr) && (rc.right - rc.left) > 50 && (rc.bottom - rc.top) > 10)
-        result = rc;
+    for (int iter = 0; iter < 8; iter++)  // safety limit
+    {
+        IUIAutomationElement* pElement = nullptr;
+        HRESULT hr = g_pUIAutomation->ElementFromPoint(pt, &pElement);
+        if (FAILED(hr) || !pElement) break;
 
-    pElement->Release();
+        RECT rc;
+        hr = pElement->get_CurrentBoundingRectangle(&rc);
+        pElement->Release();
+        if (FAILED(hr)) break;
+
+        OutputDebugFormatA("  Container [UIA][%d]  : (%d,%d,%d,%d) %dx%d\n",
+                           iter, rc.left, rc.top, rc.right, rc.bottom,
+                           rc.right - rc.left, rc.bottom - rc.top);
+
+        // Stop if we got the same rect twice in a row
+        if (rc.left == prevRc.left && rc.top == prevRc.top &&
+            rc.right == prevRc.right && rc.bottom == prevRc.bottom)
+            break;
+
+        if ((rc.right - rc.left) > 50 && (rc.bottom - rc.top) > 10)
+            result = rc;
+
+        prevRc = rc;
+
+        // Next iteration: try 0?1px inside the left edge, keep original Y
+        pt.x = rc.left + 0;// + 1;
+    }
+
     return result;
 }
 

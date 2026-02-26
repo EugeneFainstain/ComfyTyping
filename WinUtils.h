@@ -44,6 +44,7 @@ MYGLOBAL(int          , g_iNewFocusedChild, 0);
 MYGLOBAL(DWORD        , g_dwAppStartTime  , 0);
 MYGLOBAL(RECT         , g_rcContainer     , {});
 MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to detect on first tick
+MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK is lit
 
 #ifdef WIN_UTILS_CPP
     char g_szAppExeName[64] = {};

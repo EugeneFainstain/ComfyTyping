@@ -601,12 +601,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == CARET_TIMER_ID)
         {
             if (g_ptCaret.y != 0) // Only run after event-driven detection has set a valid caret
-            {
-                DetectCaretAndContainer(hWnd);
-                g_ptCaret     = g_ptLastQueriedCaret;
-                g_rcContainer = g_rcLastQueriedContainer;
-                UpdateOverlayWindow(hWnd);
-            }
+                PostMessage(hWnd, WM_APP_DETECT_CARET, DETECT_REASON_TIMER, 0);
         }
         if (wParam == SETTLE_TIMER_ID)
         {
@@ -648,6 +643,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     break;
 
                 g_bWaitForInputAfterToggle = false;
+            }
+
+            // --- Handle periodic timer: skip if settling or recent user input ---
+            if (wParam == DETECT_REASON_TIMER)
+            {
+                DWORD dwNow = GetTickCount();
+                if (g_bSettling || (dwNow - dwLastEventTick < 250))
+                    break; // already settling or user was active recently
             }
 
             // --- Query caret and container on every message ---
@@ -697,6 +700,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         g_rcContainer = g_rcLastQueriedContainer;
                     UpdateOverlayWindow(hWnd);
                 }
+            }
+            else if (wParam == DETECT_REASON_TIMER)
+            {
+                // Periodic refresh: start a settle run (always freeze)
+                g_bSettling = true;
+                hSettleFG = g_hForegroundWindow;
+                ptPrevQueryCaret     = g_ptLastQueriedCaret;
+                rcPrevQueryContainer = g_rcLastQueriedContainer;
+                iSettleCount = 0;
+                QueryPerformanceCounter(&llSettlePrev);
+                SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
             }
             else // wParam == DETECT_REASON_SETTLE
             {

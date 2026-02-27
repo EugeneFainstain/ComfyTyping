@@ -31,6 +31,7 @@
 #define DETECT_REASON_KEY    0      // lParam = virtual key code
 #define DETECT_REASON_MOUSE  1
 #define DETECT_REASON_SETTLE 2      // fired by settle timer to re-detect until caret stabilizes
+#define DETECT_REASON_TIMER  3      // fired by periodic 1s timer to refresh
 #define SETTLE_TIMER_ID      1003
 #define SETTLE_TIMER_MS      15
 

@@ -118,6 +118,11 @@ int GetCaretMethodsForWindow(HWND hwnd)
 #endif
 }
 
+bool ShouldReuseCaretOnTypingLoss(HWND hwnd)
+{
+    return (GetMethodsForWindow(hwnd) & REUSE_CARET_ON_TYPING_LOSS) != 0;
+}
+
 void OutputDebugFormatA(const char* format, ...)
 {
     if (GetKeyState(VK_CAPITAL) & 0x0001)  // CAPS LOCK on = suppress debug output
@@ -546,7 +551,7 @@ POINT GetCaretPositionFromUIA()
         // find a different element (like the editor) and return wrong coordinates.
         if (hadTextPattern)
         {
-            OutputDebugFormatA("UIA: empty line — returning previous (%d,%d)\n", s_lastResult.x, s_lastResult.y);
+            OutputDebugFormatA("UIA: empty line - returning previous (%d,%d)\n", s_lastResult.x, s_lastResult.y);
             return s_lastResult;
         }
     }

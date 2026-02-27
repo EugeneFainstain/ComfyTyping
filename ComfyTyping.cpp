@@ -622,6 +622,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (wParam != DETECT_REASON_SETTLE)
                 OutputDebugFormatA("\n\n");
 
+            // --- Classify typing events for caret-loss fallback ---
+            bool bIsTypingEvent = false;
+            if (wParam == DETECT_REASON_KEY)
+            {
+                DWORD vk = (DWORD)lParam;
+                UINT  mappedChar    = MapVirtualKey(vk, MAPVK_VK_TO_CHAR);
+                bool  bPrintableKey = mappedChar && std::isprint(mappedChar);
+                bIsTypingEvent = bPrintableKey || vk == VK_RETURN || vk == VK_TAB || vk == VK_BACK || vk == VK_DELETE
+                                 || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN
+                                 || vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_INSERT;
+            }
+
             // --- Process event flags (key/mouse only, not settle ticks) ---
             if (wParam == DETECT_REASON_KEY)
             {
@@ -722,10 +734,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
             OutputDebugFormatA("  detect=%.2fms\n", detectMs);
 
-            // --- Always promote fresh caret ---
-            g_ptCaret = g_ptLastQueriedCaret;
+            // --- Promote caret (with typing-loss fallback) ---
+            bool bCaretLossFallback = (g_ptLastQueriedCaret.y == 0 &&
+                (bIsTypingEvent || wParam == DETECT_REASON_SETTLE) &&
+                ShouldReuseCaretOnTypingLoss(g_hForegroundWindow));
+            if (bCaretLossFallback)
+            {
+                g_ptCaret     = g_ptLastSettledCaret;
+                g_rcContainer = g_rcLastSettledContainer;
+                OutputDebugFormatA("  Caret lost after keypress - reusing settled caret(%d,%d) container(%d,%d,%d,%d)\n",
+                                   g_ptCaret.x, g_ptCaret.y,
+                                   g_rcContainer.left, g_rcContainer.top,
+                                   g_rcContainer.right, g_rcContainer.bottom);
+            }
+            else
+                g_ptCaret = g_ptLastQueriedCaret;
 
-            if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE) || (wParam == DETECT_REASON_ALT_UP))
+            if (bCaretLossFallback)
+            {
+                // Caret lost after typing key: cancel any running settle, paint with settled values
+                if (g_bSettling)
+                {
+                    KillTimer(hWnd, SETTLE_TIMER_ID);
+                    g_bSettling = false;
+                }
+                UpdateOverlayWindow(hWnd);
+            }
+            else if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE) || (wParam == DETECT_REASON_ALT_UP))
             {
                 // Determine if this is a context switch (long timeout needed)
                 bool bLongTimeout = (g_hForegroundWindow != hPrevSettledFG) || (wParam == DETECT_REASON_ALT_UP);
@@ -748,7 +783,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     {
                         // Same context: use last settled container, paint immediately
                         g_rcContainer = g_rcLastSettledContainer;
-                        OutputDebugFormatA("  Settle interrupted — caret(%d,%d), last settled container(%d,%d,%d,%d)\n",
+                        OutputDebugFormatA("  Settle interrupted - caret(%d,%d), last settled container(%d,%d,%d,%d)\n",
                                            g_ptCaret.x, g_ptCaret.y,
                                            g_rcContainer.left, g_rcContainer.top,
                                            g_rcContainer.right, g_rcContainer.bottom);
@@ -756,7 +791,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                             UpdateOverlayWindow(hWnd);
                     }
                     else
-                        OutputDebugFormatA("  Settle interrupted — context switch, deferring paint\n");
+                        OutputDebugFormatA("  Settle interrupted - context switch, deferring paint\n");
                 }
                 // Start (or restart) settle loop — freeze grabs only if no recent event
                 DWORD dwNow = GetTickCount();
@@ -791,6 +826,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             else // wParam == DETECT_REASON_SETTLE
             {
+                // Caret lost during settle: abort, reuse settled values
+                if (bCaretLossFallback)
+                {
+                    KillTimer(hWnd, SETTLE_TIMER_ID);
+                    g_bSettling = false;
+                    OutputDebugFormatA("  Settle aborted - caret lost, reusing settled caret(%d,%d) container(%d,%d,%d,%d)\n",
+                                       g_ptCaret.x, g_ptCaret.y,
+                                       g_rcContainer.left, g_rcContainer.top,
+                                       g_rcContainer.right, g_rcContainer.bottom);
+                    UpdateOverlayWindow(hWnd);
+                    break;
+                }
+
                 // Settle tick: compare queried values with previous tick
                 bool bCaretMoved = (g_ptLastQueriedCaret.x != ptPrevQueryCaret.x ||
                                     g_ptLastQueriedCaret.y != ptPrevQueryCaret.y);

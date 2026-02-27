@@ -438,7 +438,7 @@ static void DetectCaretAndContainer(HWND hWnd)
                     OutputDebugFormatA("  Container [Hook]     : '%s' (%d,%d,%d,%d) %dx%d\n",
                                        cls, rc.left, rc.top, rc.right, rc.bottom,
                                        w, rc.bottom - rc.top);
-                    if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Hook"; }
+                    if (w > 0 && w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Hook"; }
                 }
                 else
                     OutputDebugFormatA("  Container [Hook]     : no focused child\n");
@@ -461,7 +461,7 @@ static void DetectCaretAndContainer(HWND hWnd)
                     OutputDebugFormatA("  Container [Enum]     : '%s' (%d,%d,%d,%d) %dx%d\n",
                                        cls, rc.left, rc.top, rc.right, rc.bottom,
                                        w, rc.bottom - rc.top);
-                    if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Enum"; }
+                    if (w > 0 && w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "Enum"; }
                 }
                 else
                     OutputDebugFormatA("  Container [Enum]     : no match (%d children)\n", childCount);
@@ -479,7 +479,7 @@ static void DetectCaretAndContainer(HWND hWnd)
                     OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
                                        rc.left, rc.top, rc.right, rc.bottom,
                                        w, rc.bottom - rc.top);
-                    if (w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
+                    if (w > 0 && w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
                 }
                 else
                     OutputDebugFormatA("  Container [UIA]      : not found\n");
@@ -614,6 +614,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static POINT ptPrevQueryCaret = {};
             static RECT  rcPrevQueryContainer = {};
             static HWND  hSettleFG = nullptr;
+            static HWND  hPrevSettledFG = nullptr;
             static int   iSettleCount = 0;
             static LARGE_INTEGER llSettlePrev = {};
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
@@ -665,35 +666,54 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // --- Always promote fresh caret ---
             g_ptCaret = g_ptLastQueriedCaret;
 
-            if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE))
+            if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE) || (wParam == DETECT_REASON_ALT_UP))
             {
+                // Determine if this is a context switch (long timeout needed)
+                bool bLongTimeout = (g_hForegroundWindow != hPrevSettledFG) || (wParam == DETECT_REASON_ALT_UP);
+                if (wParam == DETECT_REASON_MOUSE)
+                {
+                    int clickX = (short)LOWORD(lParam);
+                    int clickY = (short)HIWORD(lParam);
+                    int dx = clickX - g_ptLastSettledCaret.x;
+                    int dy = clickY - g_ptLastSettledCaret.y;
+                    if (dx*dx + dy*dy > 100*100)
+                        bLongTimeout = true;
+                }
+
                 if (g_bSettling) // was in the middle of settling?...
                 {
-                    // New event while settling: abort current settle, keep last settled container
+                    // New event while settling: abort current settle
                     KillTimer(hWnd, SETTLE_TIMER_ID);
                     g_bSettling = false;
-                    g_rcContainer = g_rcLastSettledContainer;
-                    OutputDebugFormatA("  Settle interrupted — caret(%d,%d), last settled container(%d,%d,%d,%d)\n",
-                                       g_ptCaret.x, g_ptCaret.y,
-                                       g_rcContainer.left, g_rcContainer.top,
-                                       g_rcContainer.right, g_rcContainer.bottom);
-                    if (g_ptCaret.y != 0)
-                        UpdateOverlayWindow(hWnd);
+                    if (!bLongTimeout)
+                    {
+                        // Same context: use last settled container, paint immediately
+                        g_rcContainer = g_rcLastSettledContainer;
+                        OutputDebugFormatA("  Settle interrupted — caret(%d,%d), last settled container(%d,%d,%d,%d)\n",
+                                           g_ptCaret.x, g_ptCaret.y,
+                                           g_rcContainer.left, g_rcContainer.top,
+                                           g_rcContainer.right, g_rcContainer.bottom);
+                        if (g_ptCaret.y != 0)
+                            UpdateOverlayWindow(hWnd);
+                    }
+                    else
+                        OutputDebugFormatA("  Settle interrupted — context switch, deferring paint\n");
                 }
                 // Start (or restart) settle loop — freeze grabs only if no recent event
                 DWORD dwNow = GetTickCount();
                 bool bOkToFreeze = (dwNow - dwLastEventTick > 250);
                 dwLastEventTick = dwNow;
-                g_bSettling = bOkToFreeze ? true : false;
+                g_bSettling = (bOkToFreeze || bLongTimeout) ? true : false;
                 hSettleFG = g_hForegroundWindow;
+                int firstSettleMs = bLongTimeout ? SETTLE_TIMER_ON_WINDOW_CHANGE_MS : SETTLE_TIMER_MS;
                 ptPrevQueryCaret     = g_ptLastQueriedCaret;
                 rcPrevQueryContainer = g_rcLastQueriedContainer;
                 iSettleCount = 0;
                 QueryPerformanceCounter(&llSettlePrev);
-                SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
-                if (!bOkToFreeze)
+                SetTimer(hWnd, SETTLE_TIMER_ID, firstSettleMs, NULL);
+                if (!bOkToFreeze && !bLongTimeout)
                 {
-                    // Rapid event: use last settled container, paint immediately
+                    // Rapid event, same context: use last settled container, paint immediately
                     if (g_rcLastSettledContainer.right != 0)
                         g_rcContainer = g_rcLastSettledContainer;
                     else
@@ -752,6 +772,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 {
                     // Settled: promote both queried values to active + settled
                     g_bSettling = false;
+                    hPrevSettledFG            = hSettleFG;
                     g_ptLastSettledCaret      = g_ptLastQueriedCaret;
                     g_rcLastSettledContainer  = g_rcLastQueriedContainer;
                     g_rcContainer             = g_rcLastSettledContainer;
@@ -1140,11 +1161,16 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
+    if (nCode == HC_ACTION)
     {
         KBDLLHOOKSTRUCT *pKB = (KBDLLHOOKSTRUCT *)lParam;
-        PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                    DETECT_REASON_KEY, (LPARAM)pKB->vkCode);
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
+            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                        DETECT_REASON_KEY, (LPARAM)pKB->vkCode);
+        else if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) &&
+                 (pKB->vkCode == VK_MENU || pKB->vkCode == VK_LMENU || pKB->vkCode == VK_RMENU))
+            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                        DETECT_REASON_ALT_UP, 0);
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }

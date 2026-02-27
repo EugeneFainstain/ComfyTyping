@@ -32,8 +32,10 @@
 #define DETECT_REASON_MOUSE  1
 #define DETECT_REASON_SETTLE 2      // fired by settle timer to re-detect until caret stabilizes
 #define DETECT_REASON_TIMER  3      // fired by periodic 1s timer to refresh
+#define DETECT_REASON_ALT_UP 4      // Alt key released (Alt+Tab completed)
 #define SETTLE_TIMER_ID      1003
 #define SETTLE_TIMER_MS      15
+#define SETTLE_TIMER_ON_WINDOW_CHANGE_MS 100 // 50 is too little...
 
 #define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )
 #define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )

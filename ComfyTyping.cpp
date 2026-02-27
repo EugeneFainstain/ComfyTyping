@@ -606,6 +606,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static HWND  hSettleFG = nullptr;
             static int   iSettleCount = 0;
             static LARGE_INTEGER llSettlePrev = {};
+            static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
 
             // --- Process event flags (key/mouse only, not settle ticks) ---
             if (wParam == DETECT_REASON_KEY)
@@ -630,13 +631,38 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if (!bSettling)
             {
-                // Key/mouse event: always defer detection by 15ms
-                g_bSettling = true;
+                if (g_bSettling)
+                {
+                    // New event while settling: swap pending grab into primary, paint+show
+                    KillTimer(hWnd, SETTLE_TIMER_ID);
+                    g_bSettling = false;
+                    g_bSwapPendingCache = true;
+                    OutputDebugFormatA("  Settle interrupted — accepting (%d,%d)\n",
+                                       g_ptCaret.x, g_ptCaret.y);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    UpdateWindow(hWnd);
+                    if (((g_ptCaret.y != 0) && !g_bTemporarilyHideMyWindow) ||
+                        ((g_hForegroundWindow == hWnd) && !g_bTemporarilyHideMyWindow))
+                        ShowMyWindow(hWnd);
+                    else
+                        HideMyWindow(hWnd);
+                }
+                // Start (or restart) settle loop — freeze grabs only if no recent event
+                DWORD dwNow = GetTickCount();
+                bool bOkToFreeze = (dwNow - dwLastEventTick > 250);
+                dwLastEventTick = dwNow;
+                g_bSettling = bOkToFreeze ? true : false;
                 hSettleFG = g_hForegroundWindow;
                 ptPrevSettle = g_ptCaret;
                 iSettleCount = 0;
                 QueryPerformanceCounter(&llSettlePrev);
                 SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
+                if (!bOkToFreeze)
+                {
+                    // Rapid event: grabs are live, paint immediately
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    UpdateWindow(hWnd);
+                }
             }
             else
             {
@@ -670,6 +696,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 {
                     // Settled: paint + show only with final stable coordinates
                     g_bSettling = false;
+                    g_bSwapPendingCache = true;
                     OutputDebugFormatA("  Settled after %d iteration(s)  delta=%.1fms  detect=%.2fms at (%d,%d)\n",
                                        iSettleCount, deltaMs, detectMs,
                                        g_ptCaret.x, g_ptCaret.y);
@@ -710,22 +737,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 // --- Cached frame buffer (intermediate between desktop and window) ---
                 static HDC     hCacheDC  = NULL;
                 static HBITMAP hCacheBmp = NULL;
+                static HDC     hPendingDC  = NULL;   // secondary buffer: grabbed during settling
+                static HBITMAP hPendingBmp = NULL;
                 static int     cacheW = 0, cacheH = 0;
                 static bool    bCacheValid = false;
 
                 if (!hCacheDC || cacheW != fullW || cacheH != fullH)
                 {
-                    if (hCacheDC)  { DeleteObject(hCacheBmp); DeleteDC(hCacheDC); }
-                    hCacheDC  = CreateCompatibleDC(hdc);
-                    hCacheBmp = CreateCompatibleBitmap(hdc, fullW, fullH);
+                    if (hCacheDC)   { DeleteObject(hCacheBmp);   DeleteDC(hCacheDC);   }
+                    if (hPendingDC) { DeleteObject(hPendingBmp); DeleteDC(hPendingDC); }
+                    hCacheDC    = CreateCompatibleDC(hdc);
+                    hCacheBmp   = CreateCompatibleBitmap(hdc, fullW, fullH);
                     SelectObject(hCacheDC, hCacheBmp);
+                    hPendingDC  = CreateCompatibleDC(hdc);
+                    hPendingBmp = CreateCompatibleBitmap(hdc, fullW, fullH);
+                    SelectObject(hPendingDC, hPendingBmp);
                     cacheW = fullW; cacheH = fullH;
                     bCacheValid = false;
                 }
 
-                // --- Coordinate update + frame grab (skipped during settling/animation if cache is valid) ---
+                // --- During settling: grab into pending DC, display from primary cache ---
                 if (g_bSettling && bCacheValid)
-                    goto skip_grab; // keep showing cached frame while caret settles
+                {
+                    HDC hScreenDC = GetDC(NULL);
+                    StretchBlt(hPendingDC, 0, 0, fullW, fullH, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
+                    ReleaseDC(NULL, hScreenDC);
+                    goto skip_grab;
+                }
 #ifdef USE_ANIMATION
                 // Invalidate cache when zoom-in starts (fresh grab needed).
                 // Zoom-out keeps the stale cache (current desktop has no useful caret data).
@@ -884,6 +922,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 } // end of coordinate update + grab block
 #ifdef USE_CACHING_DC
                 skip_grab:
+
+                // Swap pending grab into primary cache when settling ends
+                if (g_bSwapPendingCache)
+                {
+                    // Blit pending → overlay first (freshest frame)
+                    BitBlt(hdc, 0, 0, fullW, fullH, hPendingDC, 0, 0, SRCCOPY);
+                    // Then update primary cache to stay current
+                    BitBlt(hCacheDC, 0, 0, fullW, fullH, hPendingDC, 0, 0, SRCCOPY);
+                    bCacheValid = true;
+                    g_bSwapPendingCache = false;
+                }
+                else
 #endif
 
 #ifdef USE_CACHING_DC

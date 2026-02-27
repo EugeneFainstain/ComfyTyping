@@ -39,12 +39,13 @@
 #define DETECT_REASON_TIMER  3      // fired by periodic 1s timer to refresh
 #define DETECT_REASON_ALT_UP 4      // Alt key released (Alt+Tab completed)
 //#define UIA_LINE_LEVEL_EXPANSION   // Strategy 2: line-level MoveEndpointByUnit for VSCode .cpp/.h
+//#define UIA_SUBTREE_SEARCH         // FindFirst(TreeScope_Descendants) fallback — expensive, creates COM threads
+//#define NO_CONTAINER_FROM_HOOK
 
 #define SETTLE_TIMER_ID      1003
 #define SETTLE_TIMER_MS      15
 #define SETTLE_TIMER_ON_WINDOW_CHANGE_MS     150 //100 // 50 is too little...
-#define LONG_WAIT_ON_MOUSE_CLICK_DISTANCE_TH   0 // == "always slow"   100 // click farther than this from last settled caret = context switch
-#define NO_CONTAINER_FROM_HOOK
+#define LONG_WAIT_ON_MOUSE_CLICK_DISTANCE_TH   100 //0 // == "always slow"   100 // click farther than this from last settled caret = context switch
 
 #define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )
 #define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )

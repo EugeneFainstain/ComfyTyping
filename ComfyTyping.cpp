@@ -469,7 +469,7 @@ static void DetectCaretAndContainer(HWND hWnd)
             else
                 OutputDebugFormatA("  Container [Enum]     : skipped\n");
 
-            // Method 3: UIA ElementFromPoint
+            // Method 3: UIA ElementFromPoint (overrides Hook/Enum if valid)
             if (containerMethods & CONTAINER_UIA)
             {
                 RECT rc = GetContainerRectFromUIA(caret.x, caret.y);
@@ -479,7 +479,7 @@ static void DetectCaretAndContainer(HWND hWnd)
                     OutputDebugFormatA("  Container [UIA]      : (%d,%d,%d,%d) %dx%d\n",
                                        rc.left, rc.top, rc.right, rc.bottom,
                                        w, rc.bottom - rc.top);
-                    if (w > 0 && w < bestWidth) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
+                    if (w > 0) { rcBest = rc; bestWidth = w; bestName = "UIA"; }
                 }
                 else
                     OutputDebugFormatA("  Container [UIA]      : not found\n");
@@ -714,7 +714,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // --- Query caret and container on every message ---
             g_bCaretMightHaveMoved = true;
+            LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
+            QueryPerformanceCounter(&llDetectStart);
             DetectCaretAndContainer(hWnd);
+            QueryPerformanceCounter(&llDetectEnd);
+            QueryPerformanceFrequency(&llDetectFreq);
+            float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
+            OutputDebugFormatA("  detect=%.2fms\n", detectMs);
 
             // --- Always promote fresh caret ---
             g_ptCaret = g_ptLastQueriedCaret;
@@ -1213,8 +1219,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
         KBDLLHOOKSTRUCT *pKB = (KBDLLHOOKSTRUCT *)lParam;
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
         {
-            // Block ESC when overlay is active: eat the keypress, hide overlay
-            if (pKB->vkCode == VK_ESCAPE && !g_bTemporarilyHideMyWindow)
+            // Block ESC when overlay is showing: eat the keypress, hide overlay
+            if (pKB->vkCode == VK_ESCAPE && !g_bTemporarilyHideMyWindow && g_ptCaret.y != 0)
             {
                 g_bTemporarilyHideMyWindow = true;
                 PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,

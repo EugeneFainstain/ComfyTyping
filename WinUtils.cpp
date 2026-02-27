@@ -491,14 +491,20 @@ POINT GetCaretPositionFromUIA()
 
     // 1. Try the focused element directly
     IUIAutomationElement* pFocused = nullptr;
-    if (SUCCEEDED(g_pUIAutomation->GetFocusedElement(&pFocused)) && pFocused)
+    LARGE_INTEGER llA, llB, llF;
+    QueryPerformanceCounter(&llA);
+    HRESULT hrFocus = g_pUIAutomation->GetFocusedElement(&pFocused);
+    QueryPerformanceCounter(&llB);
+    QueryPerformanceFrequency(&llF);
+    float msFocus = (float)(llB.QuadPart - llA.QuadPart) * 1000.0f / llF.QuadPart;
+    if (SUCCEEDED(hrFocus) && pFocused)
     {
         // Log what element we got
         BSTR name = nullptr;
         CONTROLTYPEID ctrlType = 0;
         pFocused->get_CurrentName(&name);
         pFocused->get_CurrentControlType(&ctrlType);
-        OutputDebugFormatA("UIA: focused element: type=%d name='%S'\n", ctrlType, name ? name : L"(null)");
+        OutputDebugFormatA("UIA: focused element: type=%d name='%S'  (%.2fms)\n", ctrlType, name ? name : L"(null)", msFocus);
 
         // Check if VSCode needs screen reader mode toggle
         bool needsToggle = name && wcsstr(name, L"not accessible") && wcsstr(name, L"screen reader") && wcsstr(name, L"Shift+Alt+F1");
@@ -545,6 +551,7 @@ POINT GetCaretPositionFromUIA()
         }
     }
 
+#ifdef UIA_SUBTREE_SEARCH
     // 2. Try from the foreground window's root element - search entire window tree
     if (!g_hForegroundWindow)
         return result;
@@ -568,12 +575,16 @@ POINT GetCaretPositionFromUIA()
         if (SUCCEEDED(hr) && pCondition)
         {
             IUIAutomationElement* pChild = nullptr;
+            QueryPerformanceCounter(&llA);
             hr = pWindow->FindFirst(TreeScope_Descendants, pCondition, &pChild);
+            QueryPerformanceCounter(&llB);
+            QueryPerformanceFrequency(&llF);
+            float msFind = (float)(llB.QuadPart - llA.QuadPart) * 1000.0f / llF.QuadPart;
             if (SUCCEEDED(hr) && pChild)
             {
                 BSTR childName = nullptr;
                 pChild->get_CurrentName(&childName);
-                OutputDebugFormatA("UIA: found %s element: '%S'\n", patternNames[i], childName ? childName : L"(null)");
+                OutputDebugFormatA("UIA: found %s element: '%S'  (%.2fms)\n", patternNames[i], childName ? childName : L"(null)", msFind);
                 if (childName) SysFreeString(childName);
                 TryGetCaretFromElement(pChild, result);
                 pChild->Release();
@@ -587,6 +598,7 @@ POINT GetCaretPositionFromUIA()
     }
 
     pWindow->Release();
+#endif // UIA_SUBTREE_SEARCH
     cachedResult = result;
     if (result.y != 0) s_lastResult = result;
     return result;
@@ -658,7 +670,12 @@ RECT GetContainerRectFromUIA(int x, int y)
     for (int iter = 0; iter < 8; iter++)  // safety limit
     {
         IUIAutomationElement* pElement = nullptr;
+        LARGE_INTEGER llA, llB, llF;
+        QueryPerformanceCounter(&llA);
         HRESULT hr = g_pUIAutomation->ElementFromPoint(pt, &pElement);
+        QueryPerformanceCounter(&llB);
+        QueryPerformanceFrequency(&llF);
+        float msEFP = (float)(llB.QuadPart - llA.QuadPart) * 1000.0f / llF.QuadPart;
         if (FAILED(hr) || !pElement) break;
 
         RECT rc;
@@ -674,11 +691,12 @@ RECT GetContainerRectFromUIA(int x, int y)
         // Truncate name at first newline
         if (bstrName) { WCHAR* nl = wcspbrk(bstrName, L"\r\n"); if (nl) *nl = 0; }
 
-        OutputDebugFormatA("  Container [UIA][%d]  : (%d,%d,%d,%d) %dx%d  '%ls' [%ls]\n",
+        OutputDebugFormatA("  Container [UIA][%d]  : (%d,%d,%d,%d) %dx%d  '%ls' [%ls]  (%.2fms)\n",
                            iter, rc.left, rc.top, rc.right, rc.bottom,
                            rc.right - rc.left, rc.bottom - rc.top,
                            bstrName ? bstrName : L"",
-                           bstrClass ? bstrClass : L"");
+                           bstrClass ? bstrClass : L"",
+                           msEFP);
         SysFreeString(bstrName);
         SysFreeString(bstrClass);
 

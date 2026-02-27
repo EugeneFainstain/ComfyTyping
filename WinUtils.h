@@ -47,7 +47,6 @@ MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to dete
 MYGLOBAL(bool         , g_bWaitForInputAfterToggle, false); // set after VSCode screen reader toggle; cleared by hooks
 MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK is lit
 MYGLOBAL(bool         , g_bSettling           , false); // true while settle loop runs; suppresses desktop grab
-MYGLOBAL(bool         , g_bSwapPendingCache   , false); // when set, WM_PAINT swaps pending DC into primary cache
 
 // Animation state for show/hide/resize
 MYGLOBAL(int          , g_iAnimWidth  , 0    ); // current animated width

@@ -624,6 +624,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             else if (wParam == DETECT_REASON_MOUSE)
             {
+                // Hit-test: skip detection for title bar / buttons / scrollbars
+                int clickX = (short)LOWORD(lParam);
+                int clickY = (short)HIWORD(lParam);
+                LRESULT ht = SendMessage(g_hForegroundWindow, WM_NCHITTEST, 0, MAKELPARAM(clickX, clickY));
+                if (ht == HTCAPTION || ht == HTMINBUTTON || ht == HTMAXBUTTON || ht == HTCLOSE ||
+                    ht == HTMENU || ht == HTSYSMENU || ht == HTVSCROLL || ht == HTHSCROLL)
+                    break;
+
                 g_bWaitForInputAfterToggle = false;
             }
 
@@ -1100,11 +1108,13 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 
 LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
+    LRESULT res = CallNextHookEx(NULL, nCode, wParam, lParam);
     if (nCode == HC_ACTION &&
         (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN))
     {
+        MSLLHOOKSTRUCT *pMS = (MSLLHOOKSTRUCT *)lParam;
         PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                    DETECT_REASON_MOUSE, 0);
+                    DETECT_REASON_MOUSE, MAKELPARAM(pMS->pt.x, pMS->pt.y));
     }
-    return CallNextHookEx(NULL, nCode, wParam, lParam);
+    return res;
 }

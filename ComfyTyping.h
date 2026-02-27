@@ -20,7 +20,12 @@
 #endif
 
 #define CARET_TIMER_ID       1002   // Unique timer ID
-#define CARET_TIMER_INTERVAL 1000   // Background poll (not the main driver; event-driven detection handles most updates)
+
+#ifdef _DEBUG
+    #define CARET_TIMER_INTERVAL 100000   // Background poll (not the main driver; event-driven detection handles most updates)
+#else
+    #define CARET_TIMER_INTERVAL 100      // Background poll (not the main driver; event-driven detection handles most updates)
+#endif
 
 //#define USE_ANIMATION
 #define USE_CACHING_DC
@@ -33,9 +38,13 @@
 #define DETECT_REASON_SETTLE 2      // fired by settle timer to re-detect until caret stabilizes
 #define DETECT_REASON_TIMER  3      // fired by periodic 1s timer to refresh
 #define DETECT_REASON_ALT_UP 4      // Alt key released (Alt+Tab completed)
+//#define UIA_LINE_LEVEL_EXPANSION   // Strategy 2: line-level MoveEndpointByUnit for VSCode .cpp/.h
+
 #define SETTLE_TIMER_ID      1003
 #define SETTLE_TIMER_MS      15
-#define SETTLE_TIMER_ON_WINDOW_CHANGE_MS 100 // 50 is too little...
+#define SETTLE_TIMER_ON_WINDOW_CHANGE_MS     150 //100 // 50 is too little...
+#define LONG_WAIT_ON_MOUSE_CLICK_DISTANCE_TH   0 // == "always slow"   100 // click farther than this from last settled caret = context switch
+#define NO_CONTAINER_FROM_HOOK
 
 #define KEY_DOWN(key)    ((key < 0) ? 0 : (GetAsyncKeyState(key) & 0x8000) !=0 )
 #define KEY_TOGGLED(key) (                (GetKeyState     (key) & 0x0001) !=0 )

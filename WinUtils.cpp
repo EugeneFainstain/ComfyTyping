@@ -38,13 +38,15 @@ struct AppConfig
 // Unknown apps get METHOD_ALL (0x077).
 //
 static const AppConfig g_appConfigTable[] = {
-    { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
-    { "code.exe", 0xFF },
-//    { "code.exe", 0xFF & (~CONTAINER_HOOK) & (~CONTAINER_ENUM) },
-//    { "code.exe", 0x0F | CONTAINER_UIA },
-    { "cmd.exe",                                       CARET_UIA |                                   CONTAINER_UIA },
-    { "notepad++.exe",       CARET_GTHI | CARET_IACC             | CONTAINER_HOOK | CONTAINER_ENUM                 },
-    { "windowsterminal.exe",                           CARET_UIA |                                   CONTAINER_UIA },
+    { "dummy_app.exe", METHOD_ALL },
+
+//         { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
+//         { "code.exe", 0xFF },
+//     //    { "code.exe", 0xFF & (~CONTAINER_HOOK) & (~CONTAINER_ENUM) },
+//     //    { "code.exe", 0x0F | CONTAINER_UIA },
+//         { "cmd.exe",                                       CARET_UIA |                                   CONTAINER_UIA },
+//         { "notepad++.exe",       CARET_GTHI | CARET_IACC             | CONTAINER_HOOK | CONTAINER_ENUM                 },
+//         { "windowsterminal.exe",                           CARET_UIA |                                   CONTAINER_UIA },
 };
 
 // Helper: extract lowercase exe name from a window's owning process.
@@ -267,6 +269,7 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
             pExpanded->Release();
         }
 
+#ifdef UIA_LINE_LEVEL_EXPANSION
         // Strategy 2: line-level expansion (for providers like VSCode .cpp
         // where character-level rects don't work but line-level do)
         if (count < 4)
@@ -304,6 +307,7 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
                 pExpanded->Release();
             }
         }
+#endif // UIA_LINE_LEVEL_EXPANSION
     }
 
     if (count >= 4)
@@ -659,12 +663,24 @@ RECT GetContainerRectFromUIA(int x, int y)
 
         RECT rc;
         hr = pElement->get_CurrentBoundingRectangle(&rc);
-        pElement->Release();
-        if (FAILED(hr)) break;
 
-        OutputDebugFormatA("  Container [UIA][%d]  : (%d,%d,%d,%d) %dx%d\n",
+        BSTR bstrName = nullptr;
+        pElement->get_CurrentName(&bstrName);
+        BSTR bstrClass = nullptr;
+        pElement->get_CurrentClassName(&bstrClass);
+        pElement->Release();
+        if (FAILED(hr)) { SysFreeString(bstrName); SysFreeString(bstrClass); break; }
+
+        // Truncate name at first newline
+        if (bstrName) { WCHAR* nl = wcspbrk(bstrName, L"\r\n"); if (nl) *nl = 0; }
+
+        OutputDebugFormatA("  Container [UIA][%d]  : (%d,%d,%d,%d) %dx%d  '%ls' [%ls]\n",
                            iter, rc.left, rc.top, rc.right, rc.bottom,
-                           rc.right - rc.left, rc.bottom - rc.top);
+                           rc.right - rc.left, rc.bottom - rc.top,
+                           bstrName ? bstrName : L"",
+                           bstrClass ? bstrClass : L"");
+        SysFreeString(bstrName);
+        SysFreeString(bstrClass);
 
         // Stop if we got the same rect twice in a row
         if (rc.left == prevRc.left && rc.top == prevRc.top &&

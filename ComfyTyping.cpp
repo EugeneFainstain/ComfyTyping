@@ -616,8 +616,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static HWND  hSettleFG = nullptr;
             static HWND  hPrevSettledFG = nullptr;
             static int   iSettleCount = 0;
-            static LARGE_INTEGER llSettlePrev = {};
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
+
+            // --- Print separator for new events (not settle ticks) ---
+            if (wParam != DETECT_REASON_SETTLE)
+                OutputDebugFormatA("\n\n");
 
             // --- Process event flags (key/mouse only, not settle ticks) ---
             if (wParam == DETECT_REASON_KEY)
@@ -711,12 +714,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // --- Query caret and container on every message ---
             g_bCaretMightHaveMoved = true;
-            LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
-            QueryPerformanceCounter(&llDetectStart);
             DetectCaretAndContainer(hWnd);
-            QueryPerformanceCounter(&llDetectEnd);
-            QueryPerformanceFrequency(&llDetectFreq);
-            float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
 
             // --- Always promote fresh caret ---
             g_ptCaret = g_ptLastQueriedCaret;
@@ -731,7 +729,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     int clickY = (short)HIWORD(lParam);
                     int dx = clickX - g_ptLastSettledCaret.x;
                     int dy = clickY - g_ptLastSettledCaret.y;
-                    if (dx*dx + dy*dy > 100*100)
+                    if (dx*dx + dy*dy >= LONG_WAIT_ON_MOUSE_CLICK_DISTANCE_TH * LONG_WAIT_ON_MOUSE_CLICK_DISTANCE_TH)
                         bLongTimeout = true;
                 }
 
@@ -764,7 +762,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 ptPrevQueryCaret     = g_ptLastQueriedCaret;
                 rcPrevQueryContainer = g_rcLastQueriedContainer;
                 iSettleCount = 0;
-                QueryPerformanceCounter(&llSettlePrev);
                 SetTimer(hWnd, SETTLE_TIMER_ID, firstSettleMs, NULL);
                 if (!bOkToFreeze && !bLongTimeout)
                 {
@@ -784,18 +781,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 ptPrevQueryCaret     = g_ptLastQueriedCaret;
                 rcPrevQueryContainer = g_rcLastQueriedContainer;
                 iSettleCount = 0;
-                QueryPerformanceCounter(&llSettlePrev);
                 SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
             }
             else // wParam == DETECT_REASON_SETTLE
             {
                 // Settle tick: compare queried values with previous tick
-                LARGE_INTEGER now, freq;
-                QueryPerformanceCounter(&now);
-                QueryPerformanceFrequency(&freq);
-                float deltaMs = (float)(now.QuadPart - llSettlePrev.QuadPart) * 1000.0f / freq.QuadPart;
-                llSettlePrev = now;
-
                 bool bCaretMoved = (g_ptLastQueriedCaret.x != ptPrevQueryCaret.x ||
                                     g_ptLastQueriedCaret.y != ptPrevQueryCaret.y);
                 bool bContainerChanged = (g_rcLastQueriedContainer.left   != rcPrevQueryContainer.left  ||
@@ -805,20 +795,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 if ((bCaretMoved || bContainerChanged) && ++iSettleCount < 50)
                 {
                     if (bContainerChanged && !bCaretMoved)
-                        OutputDebugFormatA("  ******** Settle #%d  delta=%.1fms  detect=%.2fms: CONTAINER CHANGED (caret stable at %d,%d) container(%d,%d,%d,%d)->(%d,%d,%d,%d)\n",
-                                           iSettleCount, deltaMs, detectMs,
+                        OutputDebugFormatA("  ******** Settle #%d  caret@(%d,%d), container (%d,%d,%d,%d)->(%d,%d,%d,%d), size %dx%d\n",
+                                           iSettleCount,
                                            g_ptLastQueriedCaret.x, g_ptLastQueriedCaret.y,
                                            rcPrevQueryContainer.left, rcPrevQueryContainer.top,
                                            rcPrevQueryContainer.right, rcPrevQueryContainer.bottom,
                                            g_rcLastQueriedContainer.left, g_rcLastQueriedContainer.top,
-                                           g_rcLastQueriedContainer.right, g_rcLastQueriedContainer.bottom);
+                                           g_rcLastQueriedContainer.right, g_rcLastQueriedContainer.bottom,
+                                           g_rcLastQueriedContainer.right - g_rcLastQueriedContainer.left,
+                                           g_rcLastQueriedContainer.bottom - g_rcLastQueriedContainer.top);
                     else
-                        OutputDebugFormatA("  Settle #%d  delta=%.1fms  detect=%.2fms: caret(%d,%d)->(%d,%d) container(%d,%d,%d,%d)\n",
-                                           iSettleCount, deltaMs, detectMs,
+                        OutputDebugFormatA("  Settle #%d  caret update (%d,%d)->(%d,%d), container@(%d,%d,%d,%d), size %dx%d\n",
+                                           iSettleCount,
                                            ptPrevQueryCaret.x, ptPrevQueryCaret.y,
                                            g_ptLastQueriedCaret.x, g_ptLastQueriedCaret.y,
                                            g_rcLastQueriedContainer.left, g_rcLastQueriedContainer.top,
-                                           g_rcLastQueriedContainer.right, g_rcLastQueriedContainer.bottom);
+                                           g_rcLastQueriedContainer.right, g_rcLastQueriedContainer.bottom,
+                                           g_rcLastQueriedContainer.right - g_rcLastQueriedContainer.left,
+                                           g_rcLastQueriedContainer.bottom - g_rcLastQueriedContainer.top);
                     ptPrevQueryCaret     = g_ptLastQueriedCaret;
                     rcPrevQueryContainer = g_rcLastQueriedContainer;
                     SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
@@ -831,9 +825,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     g_ptLastSettledCaret      = g_ptLastQueriedCaret;
                     g_rcLastSettledContainer  = g_rcLastQueriedContainer;
                     g_rcContainer             = g_rcLastSettledContainer;
-                    OutputDebugFormatA("  Settled after %d iteration(s)  delta=%.1fms  detect=%.2fms at (%d,%d)\n",
-                                       iSettleCount, deltaMs, detectMs,
-                                       g_ptCaret.x, g_ptCaret.y);
+                    OutputDebugFormatA("  Settled:  caret@(%d,%d), container %dx%d ########################################\n",
+                                       g_ptCaret.x, g_ptCaret.y,
+                                       g_rcContainer.right - g_rcContainer.left,
+                                       g_rcContainer.bottom - g_rcContainer.top);
                     UpdateOverlayWindow(hWnd);
                 }
             }

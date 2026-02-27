@@ -80,7 +80,11 @@ MYGLOBAL(int          , g_iAnimToH    , 0    ); // target height
 #define CONTAINER_UIA   0x040
 #define CONTAINER_ALL   0x070
 
-#define METHOD_ALL (CARET_ALL | CONTAINER_ALL)
+#ifdef NO_CONTAINER_FROM_HOOK
+    #define METHOD_ALL ((CARET_ALL | CONTAINER_ALL) & ~CONTAINER_HOOK)
+#else
+    #define METHOD_ALL (CARET_ALL | CONTAINER_ALL)
+#endif
 
 void OutputDebugFormatA(const char* format, ...);
 void DebugTraceA(const char* format, ...);

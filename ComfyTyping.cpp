@@ -335,7 +335,9 @@ void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
 // Called from WM_APP_DETECT_CARET (event-driven) and CARET_TIMER (periodic).
 // bShowHide=false: detect only (caller will show/hide after painting).
 // ---------------------------------------------------------------------------
-static void DetectCaretAndUpdateWindow(HWND hWnd, bool bShowHide = true)
+// Query caret and container from the system. Writes to g_ptLastQueriedCaret / g_rcLastQueriedContainer.
+// Does NOT touch g_ptCaret, g_rcContainer, or g_iEffectiveWidth.
+static void DetectCaretAndContainer(HWND hWnd)
 {
     if (!(g_hForegroundWindow = GetForegroundWindow()))
         return; // can be NULL during focus transitions
@@ -412,13 +414,14 @@ static void DetectCaretAndUpdateWindow(HWND hWnd, bool bShowHide = true)
         g_bCaretFromAccessibility = bCaretFromAccessibility;
 
         // --- Container detection (try all enabled, pick narrowest) ---
+        RECT rcBest = g_rcLastQueriedContainer; // keep previous if no caret
         if (caret.y != 0)
         {
             HWND hRoot = GetAncestor(g_hForegroundWindow, GA_ROOT);
             if (!hRoot) hRoot = g_hForegroundWindow;
 
             int containerMethods = GetContainerMethodsForWindow(g_hForegroundWindow);
-            RECT rcBest = {};
+            rcBest = {};
             int  bestWidth = INT_MAX;
             const char* bestName = "fallback";
 
@@ -494,38 +497,44 @@ static void DetectCaretAndUpdateWindow(HWND hWnd, bool bShowHide = true)
             }
             else
                 OutputDebugFormatA("  => Winner: %s (%d wide)\n", bestName, bestWidth);
-
-            g_rcContainer = rcBest;
-
-            // Shrink overlay width when container is narrower than the default capture area
-            int containerWidth = rcBest.right - rcBest.left;
-            int newEffective = min((int)g_iMyWidth, containerWidth * ZOOM);
-            if (newEffective != g_iEffectiveWidth)
-            {
-                g_iEffectiveWidth = newEffective;
-                g_iMyWindowX = (g_iScreenWidth - g_iEffectiveWidth) / 2;
-            }
         }
 
+        // Write to "queried" globals only
         if ((caret.y < 0) || (caret.y > g_iScreenHeight))
             caret.x = caret.y = 0;
 
         if (g_hForegroundWindow != hWnd)
-            g_ptCaret = caret;
+            g_ptLastQueriedCaret = caret;
+
+        g_rcLastQueriedContainer = rcBest;
 
         g_bCaretMightHaveMoved = false;
     }
+}
 
-    if (bShowHide)
+// Recalculate g_iEffectiveWidth from current g_rcContainer
+static void UpdateEffectiveWidth()
+{
+    int containerWidth = g_rcContainer.right - g_rcContainer.left;
+    int newEffective = min((int)g_iMyWidth, containerWidth * ZOOM);
+    if (newEffective != g_iEffectiveWidth)
     {
-        static bool bWindowAtTheBottom = false;
-
-        if (((g_ptCaret.y != 0) && (g_bTemporarilyHideMyWindow == false)) ||
-            ((g_hForegroundWindow == hWnd) && (g_bTemporarilyHideMyWindow == false)))
-            ShowMyWindow(hWnd);
-        else
-            HideMyWindow(hWnd);
+        g_iEffectiveWidth = newEffective;
+        g_iMyWindowX = (g_iScreenWidth - g_iEffectiveWidth) / 2;
     }
+}
+
+// Paint + show/hide the overlay using current g_ptCaret / g_rcContainer
+static void UpdateOverlayWindow(HWND hWnd)
+{
+    UpdateEffectiveWidth();
+    InvalidateRect(hWnd, NULL, FALSE);
+    UpdateWindow(hWnd);
+    if (((g_ptCaret.y != 0) && !g_bTemporarilyHideMyWindow) ||
+        ((g_hForegroundWindow == hWnd) && !g_bTemporarilyHideMyWindow))
+        ShowMyWindow(hWnd);
+    else
+        HideMyWindow(hWnd);
 }
 
 //
@@ -592,7 +601,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == CARET_TIMER_ID)
         {
             if (g_ptCaret.y != 0) // Only run after event-driven detection has set a valid caret
-                DetectCaretAndUpdateWindow(hWnd);
+            {
+                DetectCaretAndContainer(hWnd);
+                g_ptCaret     = g_ptLastQueriedCaret;
+                g_rcContainer = g_rcLastQueriedContainer;
+                UpdateOverlayWindow(hWnd);
+            }
         }
         if (wParam == SETTLE_TIMER_ID)
         {
@@ -602,7 +616,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     case WM_APP_DETECT_CARET:
         {
-            static POINT ptPrevSettle = {};
+            static POINT ptPrevQueryCaret = {};
+            static RECT  rcPrevQueryContainer = {};
             static HWND  hSettleFG = nullptr;
             static int   iSettleCount = 0;
             static LARGE_INTEGER llSettlePrev = {};
@@ -635,27 +650,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 g_bWaitForInputAfterToggle = false;
             }
 
-            bool bSettling = (wParam == DETECT_REASON_SETTLE);
+            // --- Query caret and container on every message ---
+            g_bCaretMightHaveMoved = true;
+            LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
+            QueryPerformanceCounter(&llDetectStart);
+            DetectCaretAndContainer(hWnd);
+            QueryPerformanceCounter(&llDetectEnd);
+            QueryPerformanceFrequency(&llDetectFreq);
+            float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
 
-            if (!bSettling)
+            // --- Always promote fresh caret ---
+            g_ptCaret = g_ptLastQueriedCaret;
+
+            if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE))
             {
-                if (g_bSettling)
+                if (g_bSettling) // was in the middle of settling?...
                 {
-                    // New event while settling: abort current settle
+                    // New event while settling: abort current settle, keep last settled container
                     KillTimer(hWnd, SETTLE_TIMER_ID);
                     g_bSettling = false;
-                    OutputDebugFormatA("  Settle interrupted — accepting (%d,%d)\n",
-                                       g_ptCaret.x, g_ptCaret.y);
-                    // Only paint+show if we have a valid caret; otherwise leave window as-is
+                    g_rcContainer = g_rcLastSettledContainer;
+                    OutputDebugFormatA("  Settle interrupted — caret(%d,%d), last settled container(%d,%d,%d,%d)\n",
+                                       g_ptCaret.x, g_ptCaret.y,
+                                       g_rcContainer.left, g_rcContainer.top,
+                                       g_rcContainer.right, g_rcContainer.bottom);
                     if (g_ptCaret.y != 0)
-                    {
-                        InvalidateRect(hWnd, NULL, FALSE);
-                        UpdateWindow(hWnd);
-                        if (!g_bTemporarilyHideMyWindow)
-                            ShowMyWindow(hWnd);
-                        else
-                            HideMyWindow(hWnd);
-                    }
+                        UpdateOverlayWindow(hWnd);
                 }
                 // Start (or restart) settle loop — freeze grabs only if no recent event
                 DWORD dwNow = GetTickCount();
@@ -663,59 +683,68 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 dwLastEventTick = dwNow;
                 g_bSettling = bOkToFreeze ? true : false;
                 hSettleFG = g_hForegroundWindow;
-                ptPrevSettle = g_ptCaret;
+                ptPrevQueryCaret     = g_ptLastQueriedCaret;
+                rcPrevQueryContainer = g_rcLastQueriedContainer;
                 iSettleCount = 0;
                 QueryPerformanceCounter(&llSettlePrev);
                 SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
                 if (!bOkToFreeze)
                 {
-                    // Rapid event: grabs are live, paint immediately
-                    InvalidateRect(hWnd, NULL, FALSE);
-                    UpdateWindow(hWnd);
+                    // Rapid event: use last settled container, paint immediately
+                    if (g_rcLastSettledContainer.right != 0)
+                        g_rcContainer = g_rcLastSettledContainer;
+                    else
+                        g_rcContainer = g_rcLastQueriedContainer;
+                    UpdateOverlayWindow(hWnd);
                 }
             }
-            else
+            else // wParam == DETECT_REASON_SETTLE
             {
-                // Settle tick: detect + paint + show
-                g_bCaretMightHaveMoved = true;
-                LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
-                QueryPerformanceCounter(&llDetectStart);
-                DetectCaretAndUpdateWindow(hWnd, false);
-                QueryPerformanceCounter(&llDetectEnd);
-                QueryPerformanceFrequency(&llDetectFreq);
-                float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
-
+                // Settle tick: compare queried values with previous tick
                 LARGE_INTEGER now, freq;
                 QueryPerformanceCounter(&now);
                 QueryPerformanceFrequency(&freq);
                 float deltaMs = (float)(now.QuadPart - llSettlePrev.QuadPart) * 1000.0f / freq.QuadPart;
                 llSettlePrev = now;
 
-                // Keep going if caret moved, up to 50 iterations
-                if ((g_ptCaret.x != ptPrevSettle.x || g_ptCaret.y != ptPrevSettle.y)
-                    && ++iSettleCount < 50)
+                bool bCaretMoved = (g_ptLastQueriedCaret.x != ptPrevQueryCaret.x ||
+                                    g_ptLastQueriedCaret.y != ptPrevQueryCaret.y);
+                bool bContainerChanged = (g_rcLastQueriedContainer.left   != rcPrevQueryContainer.left  ||
+                                          g_rcLastQueriedContainer.right  != rcPrevQueryContainer.right ||
+                                          g_rcLastQueriedContainer.top    != rcPrevQueryContainer.top   ||
+                                          g_rcLastQueriedContainer.bottom != rcPrevQueryContainer.bottom);
+                if ((bCaretMoved || bContainerChanged) && ++iSettleCount < 50)
                 {
-                    OutputDebugFormatA("  Settle #%d  delta=%.1fms  detect=%.2fms: (%d,%d) -> (%d,%d)\n",
-                                       iSettleCount, deltaMs, detectMs,
-                                       ptPrevSettle.x, ptPrevSettle.y,
-                                       g_ptCaret.x, g_ptCaret.y);
-                    ptPrevSettle = g_ptCaret;
+                    if (bContainerChanged && !bCaretMoved)
+                        OutputDebugFormatA("  ******** Settle #%d  delta=%.1fms  detect=%.2fms: CONTAINER CHANGED (caret stable at %d,%d) container(%d,%d,%d,%d)->(%d,%d,%d,%d)\n",
+                                           iSettleCount, deltaMs, detectMs,
+                                           g_ptLastQueriedCaret.x, g_ptLastQueriedCaret.y,
+                                           rcPrevQueryContainer.left, rcPrevQueryContainer.top,
+                                           rcPrevQueryContainer.right, rcPrevQueryContainer.bottom,
+                                           g_rcLastQueriedContainer.left, g_rcLastQueriedContainer.top,
+                                           g_rcLastQueriedContainer.right, g_rcLastQueriedContainer.bottom);
+                    else
+                        OutputDebugFormatA("  Settle #%d  delta=%.1fms  detect=%.2fms: caret(%d,%d)->(%d,%d) container(%d,%d,%d,%d)\n",
+                                           iSettleCount, deltaMs, detectMs,
+                                           ptPrevQueryCaret.x, ptPrevQueryCaret.y,
+                                           g_ptLastQueriedCaret.x, g_ptLastQueriedCaret.y,
+                                           g_rcLastQueriedContainer.left, g_rcLastQueriedContainer.top,
+                                           g_rcLastQueriedContainer.right, g_rcLastQueriedContainer.bottom);
+                    ptPrevQueryCaret     = g_ptLastQueriedCaret;
+                    rcPrevQueryContainer = g_rcLastQueriedContainer;
                     SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
                 }
                 else
                 {
-                    // Settled: paint + show only with final stable coordinates
+                    // Settled: promote both queried values to active + settled
                     g_bSettling = false;
+                    g_ptLastSettledCaret      = g_ptLastQueriedCaret;
+                    g_rcLastSettledContainer  = g_rcLastQueriedContainer;
+                    g_rcContainer             = g_rcLastSettledContainer;
                     OutputDebugFormatA("  Settled after %d iteration(s)  delta=%.1fms  detect=%.2fms at (%d,%d)\n",
                                        iSettleCount, deltaMs, detectMs,
                                        g_ptCaret.x, g_ptCaret.y);
-                    InvalidateRect(hWnd, NULL, FALSE);
-                    UpdateWindow(hWnd);
-                    if (((g_ptCaret.y != 0) && !g_bTemporarilyHideMyWindow) ||
-                        ((g_hForegroundWindow == hWnd) && !g_bTemporarilyHideMyWindow))
-                        ShowMyWindow(hWnd);
-                    else
-                        HideMyWindow(hWnd);
+                    UpdateOverlayWindow(hWnd);
                 }
             }
         }

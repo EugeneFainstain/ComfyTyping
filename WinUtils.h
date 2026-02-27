@@ -30,6 +30,8 @@ MYGLOBAL(HWND         , g_hForegroundWindow, nullptr);
 MYGLOBAL(HWND         , g_hFocusedChildWnd , nullptr);
 MYGLOBAL(HWINEVENTHOOK, g_hEventHook       , nullptr);
 MYGLOBAL(POINT        , g_ptCaret          , {}     );
+MYGLOBAL(POINT        , g_ptLastQueriedCaret     , {}     ); // most recent detection result
+MYGLOBAL(POINT        , g_ptLastSettledCaret      , {}     ); // last stable caret (after settle completed)
 
 MYGLOBAL(bool         , g_bCaretFromAccessibility, false);
 
@@ -43,6 +45,8 @@ MYGLOBAL(int          , g_iNewFocusedChild, 0);
 
 MYGLOBAL(DWORD        , g_dwAppStartTime  , 0);
 MYGLOBAL(RECT         , g_rcContainer     , {});
+MYGLOBAL(RECT         , g_rcLastQueriedContainer  , {}); // most recent detection result
+MYGLOBAL(RECT         , g_rcLastSettledContainer   , {}); // last stable container (after settle completed)
 MYGLOBAL(bool         , g_bCaretMightHaveMoved, true); // true initially to detect on first tick
 MYGLOBAL(bool         , g_bWaitForInputAfterToggle, false); // set after VSCode screen reader toggle; cleared by hooks
 MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK is lit

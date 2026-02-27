@@ -39,7 +39,7 @@ MYGLOBAL(bool         , g_bFreezeSrcXandSrcY, false   );
 MYGLOBAL(int          , g_iTakeCaretSnapshot, 0       );
 MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
 
-MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, false);
+MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, true); // starts disabled; activated by typing 4 chars or arrow jiggle
 
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 

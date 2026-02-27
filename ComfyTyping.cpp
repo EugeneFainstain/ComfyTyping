@@ -625,13 +625,68 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 DWORD vk = (DWORD)lParam;
                 UINT  mappedChar    = MapVirtualKey(vk, MAPVK_VK_TO_CHAR);
                 bool  bPrintableKey = mappedChar && std::isprint(mappedChar);
+                bool  bTypingKey    = bPrintableKey || vk == VK_RETURN;
 
                 g_bWaitForInputAfterToggle = false;
 
+                // --- Activation tracking ---
+                static int   s_iTypingCount = 0;       // consecutive typing keypresses
+                static DWORD s_typingTicks[4] = {};     // circular buffer of timestamps
+                static DWORD s_arrowKeys[4] = {};       // recent arrow VK codes
+                static DWORD s_arrowTicks[4] = {};      // arrow timestamps
+                static int   s_iArrowCount = 0;         // arrow keys recorded (0-4)
+
                 if (vk == VK_ESCAPE)
-                    g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
-                else if (bPrintableKey || vk == VK_DELETE || vk == VK_BACK)
-                    g_bTemporarilyHideMyWindow = false;
+                {
+                    // Hook already blocked ESC & hid overlay. Just reset counters.
+                    s_iTypingCount = 0;
+                    s_iArrowCount  = 0;
+                }
+                else if (bTypingKey)
+                {
+                    s_iArrowCount = 0;
+                    s_typingTicks[s_iTypingCount % 4] = GetTickCount();
+                    s_iTypingCount++;
+                    if (s_iTypingCount >= 4)
+                    {
+                        // Rolling window: check oldest of last 4 is within 1500ms
+                        DWORD oldest = s_typingTicks[s_iTypingCount % 4];
+                        if (GetTickCount() - oldest <= 1500)
+                            g_bTemporarilyHideMyWindow = false;  // ACTIVATE
+                    }
+                }
+                else if (vk == VK_LEFT || vk == VK_RIGHT)
+                {
+                    s_iTypingCount = 0;
+                    DWORD now = GetTickCount();
+                    // Reset if gap from previous arrow > 250ms
+                    if (s_iArrowCount > 0 && (now - s_arrowTicks[s_iArrowCount - 1]) > 250)
+                        s_iArrowCount = 0;
+                    // Append
+                    if (s_iArrowCount < 4)
+                    {
+                        s_arrowKeys[s_iArrowCount]  = vk;
+                        s_arrowTicks[s_iArrowCount] = now;
+                        s_iArrowCount++;
+                    }
+                    // Check for alternating pattern of 4
+                    if (s_iArrowCount == 4)
+                    {
+                        bool bAlternating = true;
+                        for (int i = 1; i < 4; i++)
+                            if (s_arrowKeys[i] == s_arrowKeys[i - 1])
+                                bAlternating = false;
+                        if (bAlternating)
+                            g_bTemporarilyHideMyWindow = false;  // ACTIVATE
+                        s_iArrowCount = 0;
+                    }
+                }
+                else
+                {
+                    // Any other key (Delete, Backspace, Tab, modifiers, etc.)
+                    s_iTypingCount = 0;
+                    s_iArrowCount  = 0;
+                }
             }
             else if (wParam == DETECT_REASON_MOUSE)
             {
@@ -1023,8 +1078,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 //    case WM_LBUTTONDOWN: // Can't do anything on button down - because the input focus is on our window. Improve later.
     case WM_LBUTTONUP:
         {
-            g_bTemporarilyHideMyWindow = false;
-
             if( g_rcContainer.right > g_rcContainer.left )
             {
                 POINT ptCurrent; GetCursorPos(&ptCurrent);
@@ -1056,7 +1109,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_MBUTTONDOWN     :
     case WM_MBUTTONUP       :
     case WM_MBUTTONDBLCLK   :
-        g_bTemporarilyHideMyWindow = false;
         break;
     case WM_DESTROY:
         bDestroy = true;
@@ -1165,8 +1217,18 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
     {
         KBDLLHOOKSTRUCT *pKB = (KBDLLHOOKSTRUCT *)lParam;
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
+        {
+            // Block ESC when overlay is active: eat the keypress, hide overlay
+            if (pKB->vkCode == VK_ESCAPE && !g_bTemporarilyHideMyWindow)
+            {
+                g_bTemporarilyHideMyWindow = true;
+                PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                            DETECT_REASON_KEY, (LPARAM)VK_ESCAPE);
+                return 1; // block ESC from reaching the target app
+            }
             PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
                         DETECT_REASON_KEY, (LPARAM)pKB->vkCode);
+        }
         else if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) &&
                  (pKB->vkCode == VK_MENU || pKB->vkCode == VK_LMENU || pKB->vkCode == VK_RMENU))
             PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,

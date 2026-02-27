@@ -616,6 +616,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static HWND  hSettleFG = nullptr;
             static HWND  hPrevSettledFG = nullptr;
             static int   iSettleCount = 0;
+            static bool  bSettleFromTyping = false;
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
 
             // --- Print separator for new events (not settle ticks) ---
@@ -798,6 +799,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 bool bOkToFreeze = (dwNow - dwLastEventTick > 250);
                 dwLastEventTick = dwNow;
                 g_bSettling = (bOkToFreeze || bLongTimeout) ? true : false;
+                bSettleFromTyping = bIsTypingEvent;
                 hSettleFG = g_hForegroundWindow;
                 int firstSettleMs = bLongTimeout ? SETTLE_TIMER_ON_WINDOW_CHANGE_MS : SETTLE_TIMER_MS;
                 ptPrevQueryCaret     = g_ptLastQueriedCaret;
@@ -818,6 +820,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
                 // Periodic refresh: start a settle run (always freeze)
                 g_bSettling = true;
+                bSettleFromTyping = false;
                 hSettleFG = g_hForegroundWindow;
                 ptPrevQueryCaret     = g_ptLastQueriedCaret;
                 rcPrevQueryContainer = g_rcLastQueriedContainer;
@@ -873,16 +876,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 }
                 else
                 {
-                    // Settled: promote both queried values to active + settled
+                    // Settled: promote caret; conditionally promote container
                     g_bSettling = false;
-                    hPrevSettledFG            = hSettleFG;
-                    g_ptLastSettledCaret      = g_ptLastQueriedCaret;
-                    g_rcLastSettledContainer  = g_rcLastQueriedContainer;
-                    g_rcContainer             = g_rcLastSettledContainer;
-                    OutputDebugFormatA("  Settled:  caret@(%d,%d), container %dx%d ########################################\n",
-                                       g_ptCaret.x, g_ptCaret.y,
-                                       g_rcContainer.right - g_rcContainer.left,
-                                       g_rcContainer.bottom - g_rcContainer.top);
+                    hPrevSettledFG       = hSettleFG;
+                    g_ptLastSettledCaret = g_ptLastQueriedCaret;
+
+                    bool bSkipContainer = bSettleFromTyping &&
+                        ShouldSkipContainerUpdateOnTyping(g_hForegroundWindow);
+                    if (bSkipContainer)
+                    {
+                        g_rcContainer = g_rcLastSettledContainer;
+                        OutputDebugFormatA("  Settled:  caret@(%d,%d), container SKIPPED (typing) %dx%d ########################################\n",
+                                           g_ptCaret.x, g_ptCaret.y,
+                                           g_rcContainer.right - g_rcContainer.left,
+                                           g_rcContainer.bottom - g_rcContainer.top);
+                    }
+                    else
+                    {
+                        g_rcLastSettledContainer = g_rcLastQueriedContainer;
+                        g_rcContainer            = g_rcLastSettledContainer;
+                        OutputDebugFormatA("  Settled:  caret@(%d,%d), container %dx%d ########################################\n",
+                                           g_ptCaret.x, g_ptCaret.y,
+                                           g_rcContainer.right - g_rcContainer.left,
+                                           g_rcContainer.bottom - g_rcContainer.top);
+                    }
                     UpdateOverlayWindow(hWnd);
                 }
             }

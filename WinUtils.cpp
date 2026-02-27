@@ -123,6 +123,11 @@ bool ShouldReuseCaretOnTypingLoss(HWND hwnd)
     return (GetMethodsForWindow(hwnd) & REUSE_CARET_ON_TYPING_LOSS) != 0;
 }
 
+bool ShouldSkipContainerUpdateOnTyping(HWND hwnd)
+{
+    return (GetMethodsForWindow(hwnd) & SKIP_CONTAINER_UPDATE_ON_TYPING) != 0;
+}
+
 void OutputDebugFormatA(const char* format, ...)
 {
     if (GetKeyState(VK_CAPITAL) & 0x0001)  // CAPS LOCK on = suppress debug output

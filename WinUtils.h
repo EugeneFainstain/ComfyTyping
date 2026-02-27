@@ -81,12 +81,15 @@ MYGLOBAL(int          , g_iAnimToH    , 0    ); // target height
 #define CONTAINER_ALL   0x070
 
 // Behavior flags
-#define REUSE_CARET_ON_TYPING_LOSS 0x080  // if caret lost after typing key, reuse last settled caret
+#define REUSE_CARET_ON_TYPING_LOSS      0x080  // if caret lost after typing key, reuse last settled caret
+#define SKIP_CONTAINER_UPDATE_ON_TYPING 0x100  // don't update container when settle completes from a typing key
+
+#define BEHAVIOR_ALL (REUSE_CARET_ON_TYPING_LOSS | SKIP_CONTAINER_UPDATE_ON_TYPING)
 
 #ifdef NO_CONTAINER_FROM_HOOK
-    #define METHOD_ALL ((CARET_ALL | CONTAINER_ALL | REUSE_CARET_ON_TYPING_LOSS) & ~CONTAINER_HOOK)
+    #define METHOD_ALL ((CARET_ALL | CONTAINER_ALL | BEHAVIOR_ALL) & ~CONTAINER_HOOK)
 #else
-    #define METHOD_ALL (CARET_ALL | CONTAINER_ALL | REUSE_CARET_ON_TYPING_LOSS)
+    #define METHOD_ALL (CARET_ALL | CONTAINER_ALL | BEHAVIOR_ALL)
 #endif
 
 void OutputDebugFormatA(const char* format, ...);
@@ -104,6 +107,7 @@ HWND  FindSmallestChildContainingXY(HWND hwndParent, int x, int y, int* pChildCo
 RECT  GetContainerRectFromUIA(int x, int y);
 int   GetContainerMethodsForWindow(HWND hwnd);
 bool  ShouldReuseCaretOnTypingLoss(HWND hwnd);
+bool  ShouldSkipContainerUpdateOnTyping(HWND hwnd);
 void  EnableRoundedCorners(HWND hwnd);
 
 #ifdef USE_FONT_HEIGHT

@@ -1296,7 +1296,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
                         DETECT_REASON_KEY, (LPARAM)pKB->vkCode);
         }
         else if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) &&
-                 (pKB->vkCode == VK_MENU || pKB->vkCode == VK_LMENU || pKB->vkCode == VK_RMENU))
+                 (pKB->vkCode == VK_MENU || pKB->vkCode == VK_LMENU || pKB->vkCode == VK_RMENU ||
+                  pKB->vkCode == VK_CONTROL || pKB->vkCode == VK_LCONTROL || pKB->vkCode == VK_RCONTROL))
             PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
                         DETECT_REASON_ALT_UP, 0);
     }

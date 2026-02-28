@@ -632,7 +632,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 bool  bPrintableKey = mappedChar && std::isprint(mappedChar);
                 bIsTypingEvent = bPrintableKey || vk == VK_RETURN || vk == VK_TAB || vk == VK_BACK || vk == VK_DELETE
                                  || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN
-                                 || vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_INSERT;
+                                /* || vk == VK_HOME */ || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_INSERT; // Not VK_HOME - because we want to "refresh" the container size when it is pressed...
             }
 
             // --- Process event flags (key/mouse only, not settle ticks) ---

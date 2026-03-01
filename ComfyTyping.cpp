@@ -9,6 +9,7 @@
 #include "WinUtils.h"
 #include <iostream>  // for std::isprint
 #include <objbase.h> // for CoInitializeEx / CoUninitialize
+#include <dwmapi.h>  // for DwmSetWindowAttribute, DwmGetWindowAttribute
 
 #define MAX_LOADSTRING 100
 
@@ -244,13 +245,44 @@ HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 #ifdef USE_ANIMATION
-// Advance animation: compute current width from time, derive height/position, call SetWindowPos.
-// Does NOT re-evaluate the target — safe to call from the WM_PAINT loop.
-// bNoRedraw: true when called from WM_PAINT (we paint immediately after, so skip DWM repaint)
-//            false for steady-state positioning from the timer
-static void AdvanceAnimation(HWND hWnd, bool bNoRedraw = false)
+//
+// Zoom-in animation overview:
+//
+// The window is placed at its final size immediately (no resizing during animation).
+// Each WM_PAINT frame StretchBlt's the cached content at a growing scale, centered
+// in the fixed-size window. This avoids the wobble caused by per-frame SetWindowPos
+// (interior/exterior size mismatches, DWM border rounding).
+//
+// Key details:
+//   - DWMWCP_DONOTROUND hides the DWM border during animation; restored to
+//     DWMWCP_ROUND when complete.
+//   - The desktop behind the overlay is captured before the window is shown and
+//     painted onto the window surface. This makes the overlay invisible until the
+//     zoomed content grows over it. Without this, the window surface would retain
+//     stale content from the previous session (we show/hide by moving off-screen,
+//     not by destroying the window).
+//   - Both dstW and dstH must be computed directly from 't' rather than deriving
+//     height from width via integer division. The overlay is very wide and short
+//     (~2200 x 106), so height = toH * width / toW produces a long plateau at 0
+//     followed by a jump to 1 -- causing visible flicker when combined with a
+//     background fill.
+//   - The animation is driven by InvalidateRect from WM_PAINT (self-sustaining
+//     loop). WS_EX_COMPOSITED must remain active for adequate frame rate; without
+//     it WM_PAINT is the lowest-priority message and gets starved.
+//   - During animation, each frame must only paint the growing StretchBlt rect
+//     (and the border) without touching the margins. Painting the full window
+//     (e.g. FillRect black then StretchBlt) causes flicker because DWM can
+//     composite the window surface between GDI calls within a single WM_PAINT,
+//     briefly showing the intermediate all-black state.
+//   - UpdateOverlayWindow's pre-show UpdateWindow fills the cache with
+//     g_bFillCacheOnly=true so the desktop is grabbed while the overlay is still
+//     off-screen (avoiding self-capture), but the full-size content is not
+//     painted to the window surface (which would flash for one frame).
+//
+
+// Compute current animation width/height from elapsed time.
+static void AdvanceAnimation()
 {
-    // Compute animation progress: t in [0..1] using high-resolution timer
     LARGE_INTEGER now, freq;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&freq);
@@ -258,61 +290,79 @@ static void AdvanceAnimation(HWND hWnd, bool bNoRedraw = false)
     float t = (ANIM_DURATION_MS > 0) ? elapsedMs / ANIM_DURATION_MS : 1.0f;
     if (t > 1.0f) t = 1.0f;
 
-    // Linear — no easing
+    g_iAnimWidth  = g_iAnimFromW + (int)((g_iAnimToW - g_iAnimFromW) * t);
+    g_iAnimHeight = g_iAnimFromH + (int)((g_iAnimToH - g_iAnimFromH) * t);
+}
 
-    // Width is the sole driver — calculated from time
-    g_iAnimWidth = g_iAnimFromW + (int)((g_iAnimToW - g_iAnimFromW) * t);
-
-    // Height derived from width, preserving aspect ratio of the non-zero end
-    int refW = (g_iAnimToW > 0) ? g_iAnimToW : g_iAnimFromW;
-    int refH = (g_iAnimToW > 0) ? g_iAnimToH : g_iAnimFromH;
-    g_iAnimHeight = (refW > 0) ? refH * g_iAnimWidth / refW : 0;
-
-    UINT flags = SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE;
-    if (bNoRedraw) flags |= SWP_NOREDRAW; // Suppress DWM repaint — we paint right after
-
-    if (g_iAnimWidth < 1 || g_iAnimHeight < 1)
+void MySetWindowPos(HWND hWnd, bool bShow)
+{
+    if (bShow)
     {
-        // Fully hidden — park off-screen
-        SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, 4 * g_iMyWindowY,
-                     0, 0, flags | SWP_NOSIZE);
+        int targetW = g_iEffectiveWidth;
+        if (targetW != g_iAnimToW)
+        {
+            // --- Start zoom-in animation ---
+
+            // Hide DWM rounded corners / border during animation
+            DWORD cornerPref = 1; // DWMWCP_DONOTROUND
+            DwmSetWindowAttribute(hWnd, 33, &cornerPref, sizeof(cornerPref));
+
+            // Capture the desktop behind the overlay (window is still off-screen)
+            {
+                static HDC     s_hBgDC  = NULL;
+                static HBITMAP s_hBgBmp = NULL;
+                HDC hScreenDC = GetDC(NULL);
+                if (!s_hBgDC) s_hBgDC = CreateCompatibleDC(hScreenDC);
+                if (s_hBgBmp) DeleteObject(s_hBgBmp);
+                s_hBgBmp = CreateCompatibleBitmap(hScreenDC, g_iEffectiveWidth, g_iMyHeight);
+                SelectObject(s_hBgDC, s_hBgBmp);
+                BitBlt(s_hBgDC, 0, 0, g_iEffectiveWidth, g_iMyHeight,
+                       hScreenDC, g_iMyWindowX, g_iMyWindowY, SRCCOPY);
+                ReleaseDC(NULL, hScreenDC);
+                g_hAnimBgDC = s_hBgDC;
+            }
+
+            // Place window at final size, then paint the captured background
+            // so the overlay blends with the desktop until content grows over it
+            SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, g_iMyWindowY,
+                         g_iEffectiveWidth, g_iMyHeight,
+                         SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
+            {
+                HDC hdc = GetDC(hWnd);
+                BitBlt(hdc, 0, 0, g_iEffectiveWidth, g_iMyHeight, g_hAnimBgDC, 0, 0, SRCCOPY);
+                ReleaseDC(hWnd, hdc);
+            }
+            ValidateRect(hWnd, NULL);
+
+            // Initialize animation state (zoom from zero to full size)
+            g_iAnimFromW  = 0;
+            g_iAnimFromH  = 0;
+            g_iAnimToW    = targetW;
+            g_iAnimToH    = g_iMyHeight;
+            g_iAnimWidth  = 0;
+            g_iAnimHeight = 0;
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            g_llAnimStart = now.QuadPart;
+            InvalidateRect(hWnd, NULL, FALSE); // kick off WM_PAINT animation loop
+        }
+        else if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
+        {
+            // Steady-state: reposition at final size (no animation)
+            SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, g_iMyWindowY,
+                         g_iEffectiveWidth, g_iMyHeight,
+                         SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        // else: animation in progress toward same target -- don't interfere
     }
     else
     {
-        // Center the animated rect around the eventual full-size center
-        int centerX = g_iMyWindowX + g_iEffectiveWidth / 2;
-        int centerY = g_iMyWindowY + g_iMyHeight / 2;
-        int animX   = centerX - g_iAnimWidth  / 2;
-        int animY   = centerY - g_iAnimHeight / 2;
-
-        SetWindowPos(hWnd, HWND_TOPMOST, animX, animY,
-                     g_iAnimWidth, g_iAnimHeight, flags);
+        // Immediate hide (no zoom-out animation)
+        g_iAnimWidth = 0; g_iAnimHeight = 0;
+        g_iAnimToW = 0;   g_iAnimToH = 0;
+        SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, 4 * g_iMyWindowY,
+                     0, 0, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
     }
-}
-
-// Set animation target (if changed) and advance one frame.
-// Called from Show/HideMyWindow — the only path that evaluates g_iEffectiveWidth.
-void MySetWindowPos(HWND hWnd, bool bShow)
-{
-    int targetW = bShow ? g_iEffectiveWidth : 0;
-
-    // Target changed — start new animation from current width
-    if (targetW != g_iAnimToW)
-    {
-        g_iAnimFromW  = g_iAnimWidth;
-        g_iAnimFromH  = g_iAnimHeight;
-        g_iAnimToW    = targetW;
-        g_iAnimToH    = bShow ? g_iMyHeight : 0;
-        LARGE_INTEGER now;
-        QueryPerformanceCounter(&now);
-        g_llAnimStart = now.QuadPart;
-        InvalidateRect(hWnd, NULL, FALSE); // Kick off the WM_PAINT animation loop
-    }
-
-    // Only advance from the timer when animation is done (steady-state positioning).
-    // During animation, WM_PAINT drives both AdvanceAnimation and painting in lockstep.
-    if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
-        AdvanceAnimation(hWnd);
 }
 #else
 void MySetWindowPos(HWND hWnd, bool bShow)
@@ -528,8 +578,23 @@ static void UpdateEffectiveWidth()
 static void UpdateOverlayWindow(HWND hWnd)
 {
     UpdateEffectiveWidth();
+#ifdef USE_ANIMATION
+    // During animation, WM_PAINT drives itself -- don't interfere.
+    // When not animating, fill the cache (for the next animation) but skip the
+    // blit to the window surface -- otherwise the full-size content would flash
+    // for one frame when the window is shown (see g_bFillCacheOnly).
+    bool bAnimInProgress = (g_iAnimWidth != g_iAnimToW || g_iAnimHeight != g_iAnimToH);
+    if (!bAnimInProgress)
+    {
+        g_bFillCacheOnly = true;
+        InvalidateRect(hWnd, NULL, FALSE);
+        UpdateWindow(hWnd);
+        g_bFillCacheOnly = false;
+    }
+#else
     InvalidateRect(hWnd, NULL, FALSE);
     UpdateWindow(hWnd);
+#endif
     if (((g_ptCaret.y != 0) && !g_bTemporarilyHideMyWindow) ||
         ((g_hForegroundWindow == hWnd) && !g_bTemporarilyHideMyWindow))
         ShowMyWindow(hWnd);
@@ -590,7 +655,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == INVALIDATE_TIMER_ID) // Ensure it's our specific timer
         {
 #ifdef USE_ANIMATION
-            // During animation, WM_PAINT drives itself — skip timer invalidation
+            // During animation, WM_PAINT drives itself via InvalidateRect
             if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
                 InvalidateRect(hWnd, NULL, FALSE);
 #else
@@ -736,8 +801,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             OutputDebugFormatA("  detect=%.2fms\n", detectMs);
 
             // --- Promote caret (with typing-loss fallback) ---
+            // Only reuse the settled caret if the caret was lost during a typing-related
+            // event (not a mouse click). Without this check, clicking on a non-text element
+            // would trigger a settle whose fallback reuses the old caret, keeping the window visible.
             bool bCaretLossFallback = (g_ptLastQueriedCaret.y == 0 &&
-                (bIsTypingEvent || wParam == DETECT_REASON_SETTLE) &&
+                (bIsTypingEvent || (wParam == DETECT_REASON_SETTLE && bSettleFromTyping)) &&
                 ShouldReuseCaretOnTypingLoss(g_hForegroundWindow));
             if (bCaretLossFallback)
             {
@@ -912,11 +980,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
         {
 #ifdef USE_ANIMATION
-            // Advance animation BEFORE painting so content matches the new window size.
-            // (On zoom-in, SetWindowPos grows the window; painting after ensures no blank area.)
             bool bAnimating = (g_iAnimWidth != g_iAnimToW || g_iAnimHeight != g_iAnimToH);
             if (bAnimating)
-                AdvanceAnimation(hWnd, true); // true = SWP_NOREDRAW, we paint right after
+                AdvanceAnimation(); // updates g_iAnimWidth/Height from elapsed time
 #endif
 
             PAINTSTRUCT ps;
@@ -948,13 +1014,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 if (g_bSettling)
                     goto skip_grab;
 #ifdef USE_ANIMATION
-                // Invalidate cache when zoom-in starts (fresh grab needed).
-                // Zoom-out keeps the stale cache (current desktop has no useful caret data).
-                static bool bWasAnimating = false;
-                if (bAnimating && !bWasAnimating && g_iAnimToW > 0)
-                    bCacheValid = false;
-                bWasAnimating = bAnimating;
-
+                // During animation, reuse the cache (filled before window was shown).
                 if (!bAnimating || !bCacheValid)
 #endif // USE_ANIMATION
 #endif // USE_CACHING_DC
@@ -1109,18 +1169,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 #ifdef USE_CACHING_DC
                 // --- Blit from cache to window ---
-                if (bCacheValid)
+                if (bCacheValid && !g_bFillCacheOnly)
                 {
 #ifdef USE_ANIMATION
-                    int dstW = (g_iAnimWidth  > 0) ? g_iAnimWidth  : fullW;
-                    int dstH = (g_iAnimHeight > 0) ? g_iAnimHeight : fullH;
-                    if (dstW != fullW || dstH != fullH)
+                    int dstW = g_iAnimWidth;
+                    int dstH = g_iAnimHeight;
+                    if (dstW > 0 && dstH > 0 && (dstW != fullW || dstH != fullH))
                     {
+                        // Animating: StretchBlt the zoomed content centered in the window.
+                        // The margins are left untouched -- they show the captured desktop
+                        // background painted onto the window surface in MySetWindowPos.
+                        int offsetX = (fullW - dstW) / 2;
+                        int offsetY = (fullH - dstH) / 2;
+
                         SetStretchBltMode(hdc, HALFTONE);
-                        StretchBlt(hdc, 0, 0, dstW, dstH, hCacheDC, 0, 0, fullW, fullH, SRCCOPY);
+                        StretchBlt(hdc, offsetX, offsetY, dstW, dstH,
+                                   hCacheDC, 0, 0, fullW, fullH, SRCCOPY);
+
+                        // Border around the growing content (matches DWM window border color)
+                        COLORREF crBorder = 0;
+                        if (FAILED(DwmGetWindowAttribute(hWnd, 34 /*DWMWA_BORDER_COLOR*/, &crBorder, sizeof(crBorder))))
+                            crBorder = GetSysColor(COLOR_ACTIVEBORDER);
+                        HBRUSH hBorderBrush = CreateSolidBrush(crBorder);
+                        RECT rcBorder = { offsetX, offsetY, offsetX + dstW, offsetY + dstH };
+                        FrameRect(hdc, &rcBorder, hBorderBrush);
+                        DeleteObject(hBorderBrush);
                     }
-                    else
+                    else if (!bAnimating)
                         BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
+                    // else: animation just started, dstW/dstH still 0 -- skip this frame
 #else
                     BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
 #endif
@@ -1131,13 +1208,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     // RenderScaledCursor(hdc, hWnd, width, height); // Render directly to hdc - this also works
                 #endif
             }
-
             EndPaint(hWnd, &ps);
 
 #ifdef USE_ANIMATION
-            // Request next animation frame (animation was already advanced before painting)
             if (g_iAnimWidth != g_iAnimToW || g_iAnimHeight != g_iAnimToH)
-                InvalidateRect(hWnd, NULL, FALSE);
+            {
+                InvalidateRect(hWnd, NULL, FALSE); // request next animation frame
+            }
+            else if (bAnimating)
+            {
+                // Animation just finished -- restore DWM rounded corners
+                DWORD cornerPref = 2; // DWMWCP_ROUND
+                DwmSetWindowAttribute(hWnd, 33, &cornerPref, sizeof(cornerPref));
+            }
 #endif
         }
         break;

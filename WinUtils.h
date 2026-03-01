@@ -52,14 +52,16 @@ MYGLOBAL(bool         , g_bWaitForInputAfterToggle, false); // set after VSCode 
 MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK is lit
 MYGLOBAL(bool         , g_bSettling           , false); // true while settle loop runs; suppresses desktop grab
 
-// Animation state for show/hide/resize
-MYGLOBAL(int          , g_iAnimWidth  , 0    ); // current animated width
-MYGLOBAL(int          , g_iAnimHeight , 0    ); // current animated height
+// Zoom-in animation state (see block comment in ComfyTyping.cpp above AdvanceAnimation)
+MYGLOBAL(int          , g_iAnimWidth  , 0    ); // current animated width  (0..g_iAnimToW)
+MYGLOBAL(int          , g_iAnimHeight , 0    ); // current animated height (0..g_iAnimToH)
 MYGLOBAL(LONGLONG     , g_llAnimStart , 0    ); // QPC tick when animation began
-MYGLOBAL(int          , g_iAnimFromW  , 0    ); // width at animation start
-MYGLOBAL(int          , g_iAnimFromH  , 0    ); // height at animation start
-MYGLOBAL(int          , g_iAnimToW    , 0    ); // target width
-MYGLOBAL(int          , g_iAnimToH    , 0    ); // target height
+MYGLOBAL(int          , g_iAnimFromW  , 0    ); // width at animation start  (for mid-animation restart)
+MYGLOBAL(int          , g_iAnimFromH  , 0    ); // height at animation start (for mid-animation restart)
+MYGLOBAL(int          , g_iAnimToW    , 0    ); // target width  (= g_iEffectiveWidth)
+MYGLOBAL(int          , g_iAnimToH    , 0    ); // target height (= g_iMyHeight)
+MYGLOBAL(bool         , g_bFillCacheOnly, false); // when true, WM_PAINT grabs desktop to cache but skips blit
+MYGLOBAL(HDC          , g_hAnimBgDC , NULL ); // captured desktop behind overlay, painted once at animation start
 
 #ifdef WIN_UTILS_CPP
     char g_szAppExeName[64] = {};

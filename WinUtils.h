@@ -41,6 +41,7 @@ MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
 
 MYGLOBAL(bool         , g_bOverlayEnabled         , false); // master switch: true after typing/jiggle in a caret window; false at start and after ESC
 MYGLOBAL(bool         , g_bOkToShowOverlay        , false); // computed: caret exists AND no occlusion with overlay
+MYGLOBAL(bool         , g_bAnimateNextShow        , false); // one-shot: true when overlay should animate on next show
 
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 

@@ -299,8 +299,9 @@ void MySetWindowPos(HWND hWnd, bool bShow)
     if (bShow)
     {
         int targetW = g_iEffectiveWidth;
-        if (targetW != g_iAnimToW)
+        if (g_bAnimateNextShow && targetW != g_iAnimToW)
         {
+            g_bAnimateNextShow = false;
             // --- Start zoom-in animation ---
 
             // Hide DWM rounded corners / border during animation
@@ -745,7 +746,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         // Rolling window: check oldest of last 4 is within 1500ms
                         DWORD oldest = s_typingTicks[s_iTypingCount % 4];
                         if (GetTickCount() - oldest <= 1500 && !g_bOverlayEnabled && g_ptLastQueriedCaret.y != 0)
-                            g_bOverlayEnabled = true;             // ACTIVATE
+                        {   g_bOverlayEnabled = true;             // ACTIVATE
+                            g_bAnimateNextShow = true;
+                        }
                     }
                 }
                 else if (vk == VK_LEFT || vk == VK_RIGHT)
@@ -770,7 +773,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                             if (s_arrowKeys[i] == s_arrowKeys[i - 1])
                                 bAlternating = false;
                         if (bAlternating && !g_bOverlayEnabled && g_ptLastQueriedCaret.y != 0)
-                            g_bOverlayEnabled = true;             // ACTIVATE
+                        {   g_bOverlayEnabled = true;             // ACTIVATE
+                            g_bAnimateNextShow = true;
+                        }
                         s_iArrowCount = 0;
                     }
                 }

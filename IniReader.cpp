@@ -54,6 +54,9 @@ static int ParseSectionKeys(const char* buffer, char outArray[][MAX_APP_NAME], i
         {
             memcpy(outArray[count], p, keyLen);
             outArray[count][keyLen] = '\0';
+            // Lowercase the key for consistent matching
+            for (int j = 0; outArray[count][j]; j++)
+                outArray[count][j] = (char)tolower((unsigned char)outArray[count][j]);
             count++;
         }
 
@@ -106,14 +109,14 @@ void ReadConfiguration()
 }
 
 // ---------------------------------------------------------------------------
-// Lookup functions — scan in-memory arrays, case-insensitive.
+// Lookup functions — both INI keys and exeBaseName are lowercase.
 // exeBaseName should be lowercase, without ".exe".
 // ---------------------------------------------------------------------------
 bool IsAppBlacklisted(const char* exeBaseName)
 {
     for (int i = 0; i < g_iniConfig.numBlacklisted; i++)
     {
-        if (_stricmp(exeBaseName, g_iniConfig.blacklisted[i]) == 0)
+        if (strcmp(exeBaseName, g_iniConfig.blacklisted[i]) == 0)
             return true;
     }
     return false;
@@ -123,7 +126,7 @@ bool IsAppWhitelisted(const char* exeBaseName)
 {
     for (int i = 0; i < g_iniConfig.numWhitelisted; i++)
     {
-        if (_stricmp(exeBaseName, g_iniConfig.whitelisted[i]) == 0)
+        if (strcmp(exeBaseName, g_iniConfig.whitelisted[i]) == 0)
             return true;
     }
     return false;

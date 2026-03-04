@@ -21,11 +21,11 @@
 
 #define CARET_TIMER_ID       1002   // Unique timer ID
 
-#ifdef _DEBUG
-    #define CARET_TIMER_INTERVAL 100000   // Background poll (not the main driver; event-driven detection handles most updates)
-#else
-    #define CARET_TIMER_INTERVAL 100      // Background poll (not the main driver; event-driven detection handles most updates)
-#endif
+//#ifdef _DEBUG
+    #define CARET_TIMER_INTERVAL 0 //100000   // Background poll (not the main driver; event-driven detection handles most updates)
+//#else
+//    #define CARET_TIMER_INTERVAL 100      // Background poll (not the main driver; event-driven detection handles most updates)
+//#endif
 
 #define USE_ANIMATION
 #define USE_CACHING_DC

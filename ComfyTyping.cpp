@@ -84,7 +84,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     SetTimer(g_myWindowHandle, INVALIDATE_TIMER_ID, INVALIDATE_TIMER_INTERVAL, NULL); // Start the timer
 #endif
 
-    SetTimer(g_myWindowHandle, CARET_TIMER_ID, CARET_TIMER_INTERVAL, NULL); // Start the timer
+    if( CARET_TIMER_INTERVAL )
+        SetTimer(g_myWindowHandle, CARET_TIMER_ID, CARET_TIMER_INTERVAL, NULL); // Start the timer
 
     HWINEVENTHOOK hWinEventHook = SetWinEventHook(
                                     EVENT_OBJECT_FOCUS,// [in] DWORD      eventMin,

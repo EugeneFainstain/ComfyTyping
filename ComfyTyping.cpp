@@ -604,8 +604,11 @@ static void UpdateOverlayWindow(HWND hWnd)
     InvalidateRect(hWnd, NULL, FALSE);
     UpdateWindow(hWnd);
 #endif
-    if (g_bOverlayEnabled && !g_bTemporarilyHideMyWindow &&
-        (g_ptCaret.y != 0 || g_hForegroundWindow == hWnd))
+    // Compute whether it's OK to show (caret exists and doesn't overlap overlay)
+    g_bOkToShowOverlay = (g_ptCaret.y != 0) &&
+                         !(g_ptCaret.y >= g_iMyWindowY && g_ptCaret.y < g_iMyWindowY + g_iMyHeight);
+
+    if (g_bOverlayEnabled && (g_bOkToShowOverlay || g_hForegroundWindow == hWnd))
         ShowMyWindow(hWnd);
     else
         HideMyWindow(hWnd);
@@ -640,7 +643,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 //             else
 //                 HideMyWindow(hWnd); // Toggle Show/Hide instead of minimization...
 
-            //g_bTemporarilyHideMyWindow = !g_bTemporarilyHideMyWindow;
+            //g_bOkToShowOverlay = !g_bOkToShowOverlay;
             return (LPARAM)0; // Not calling DefWindowProc() here
         }
         break;
@@ -742,10 +745,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         // Rolling window: check oldest of last 4 is within 1500ms
                         DWORD oldest = s_typingTicks[s_iTypingCount % 4];
                         if (GetTickCount() - oldest <= 1500 && !g_bOverlayEnabled && g_ptLastQueriedCaret.y != 0)
-                        {
                             g_bOverlayEnabled = true;             // ACTIVATE
-                            g_bTemporarilyHideMyWindow = false;
-                        }
                     }
                 }
                 else if (vk == VK_LEFT || vk == VK_RIGHT)
@@ -770,10 +770,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                             if (s_arrowKeys[i] == s_arrowKeys[i - 1])
                                 bAlternating = false;
                         if (bAlternating && !g_bOverlayEnabled && g_ptLastQueriedCaret.y != 0)
-                        {
                             g_bOverlayEnabled = true;             // ACTIVATE
-                            g_bTemporarilyHideMyWindow = false;
-                        }
                         s_iArrowCount = 0;
                     }
                 }

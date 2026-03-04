@@ -40,7 +40,7 @@ MYGLOBAL(int          , g_iTakeCaretSnapshot, 0       );
 MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
 
 MYGLOBAL(bool         , g_bOverlayEnabled         , false); // master switch: true after typing/jiggle in a caret window; false at start and after ESC
-MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, false); // secondary gate (only when g_bOverlayEnabled): true = hide overlay temporarily
+MYGLOBAL(bool         , g_bOkToShowOverlay        , false); // computed: caret exists AND no occlusion with overlay
 
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 

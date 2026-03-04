@@ -299,9 +299,8 @@ void MySetWindowPos(HWND hWnd, bool bShow)
     if (bShow)
     {
         int targetW = g_iEffectiveWidth;
-        if (targetW != g_iAnimToW && !g_bOverlayEnabled)
+        if (targetW != g_iAnimToW)
         {
-            g_bOverlayEnabled = true;
             // --- Start zoom-in animation ---
 
             // Hide DWM rounded corners / border during animation
@@ -350,7 +349,6 @@ void MySetWindowPos(HWND hWnd, bool bShow)
         else if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
         {
             // Steady-state: reposition at final size (no animation)
-            g_bOverlayEnabled = true;
             g_iAnimToW    = targetW;
             g_iAnimToH    = g_iMyHeight;
             g_iAnimWidth  = targetW;
@@ -606,8 +604,8 @@ static void UpdateOverlayWindow(HWND hWnd)
     InvalidateRect(hWnd, NULL, FALSE);
     UpdateWindow(hWnd);
 #endif
-    if (((g_ptCaret.y != 0) && !g_bTemporarilyHideMyWindow) ||
-        ((g_hForegroundWindow == hWnd) && !g_bTemporarilyHideMyWindow))
+    if (g_bOverlayEnabled && !g_bTemporarilyHideMyWindow &&
+        (g_ptCaret.y != 0 || g_hForegroundWindow == hWnd))
         ShowMyWindow(hWnd);
     else
         HideMyWindow(hWnd);
@@ -743,8 +741,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     {
                         // Rolling window: check oldest of last 4 is within 1500ms
                         DWORD oldest = s_typingTicks[s_iTypingCount % 4];
-                        if (GetTickCount() - oldest <= 1500)
-                            g_bTemporarilyHideMyWindow = false;  // ACTIVATE
+                        if (GetTickCount() - oldest <= 1500 && !g_bOverlayEnabled && g_ptLastQueriedCaret.y != 0)
+                        {
+                            g_bOverlayEnabled = true;             // ACTIVATE
+                            g_bTemporarilyHideMyWindow = false;
+                        }
                     }
                 }
                 else if (vk == VK_LEFT || vk == VK_RIGHT)
@@ -768,8 +769,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         for (int i = 1; i < 4; i++)
                             if (s_arrowKeys[i] == s_arrowKeys[i - 1])
                                 bAlternating = false;
-                        if (bAlternating)
-                            g_bTemporarilyHideMyWindow = false;  // ACTIVATE
+                        if (bAlternating && !g_bOverlayEnabled && g_ptLastQueriedCaret.y != 0)
+                        {
+                            g_bOverlayEnabled = true;             // ACTIVATE
+                            g_bTemporarilyHideMyWindow = false;
+                        }
                         s_iArrowCount = 0;
                     }
                 }
@@ -1378,10 +1382,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
         KBDLLHOOKSTRUCT *pKB = (KBDLLHOOKSTRUCT *)lParam;
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
         {
-            // Block ESC when overlay is showing: eat the keypress, hide overlay
-            if (pKB->vkCode == VK_ESCAPE && !g_bTemporarilyHideMyWindow && g_ptCaret.y != 0)
+            // Block ESC when overlay is enabled: eat the keypress, disable overlay
+            if (pKB->vkCode == VK_ESCAPE && g_bOverlayEnabled && g_ptCaret.y != 0)
             {
-                g_bTemporarilyHideMyWindow = true;
                 g_bOverlayEnabled = false;
                 PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
                             DETECT_REASON_KEY, (LPARAM)VK_ESCAPE);

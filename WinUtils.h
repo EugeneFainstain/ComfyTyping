@@ -39,8 +39,8 @@ MYGLOBAL(bool         , g_bFreezeSrcXandSrcY, false   );
 MYGLOBAL(int          , g_iTakeCaretSnapshot, 0       );
 MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
 
-MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, true); // starts disabled; activated by typing 4 chars or arrow jiggle
-MYGLOBAL(bool         , g_bOverlayEnabled         , false); // true while overlay is active (typing/jiggle); false at start and after ESC
+MYGLOBAL(bool         , g_bOverlayEnabled         , false); // master switch: true after typing/jiggle in a caret window; false at start and after ESC
+MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, false); // secondary gate (only when g_bOverlayEnabled): true = hide overlay temporarily
 
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 

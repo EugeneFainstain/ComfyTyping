@@ -29,7 +29,7 @@
 
 #define USE_ANIMATION
 #define USE_CACHING_DC
-#define ANIM_DURATION_MS     500    // Show/hide/resize animation duration
+#define ANIM_DURATION_MS     250    // Show/hide/resize animation duration
 
 // Event-driven caret detection: hooks PostMessage instead of setting globals
 #define WM_APP_DETECT_CARET  (WM_APP + 1)

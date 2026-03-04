@@ -299,8 +299,9 @@ void MySetWindowPos(HWND hWnd, bool bShow)
     if (bShow)
     {
         int targetW = g_iEffectiveWidth;
-        if (targetW != g_iAnimToW)
+        if (targetW != g_iAnimToW && !g_bOverlayEnabled)
         {
+            g_bOverlayEnabled = true;
             // --- Start zoom-in animation ---
 
             // Hide DWM rounded corners / border during animation
@@ -349,6 +350,11 @@ void MySetWindowPos(HWND hWnd, bool bShow)
         else if (g_iAnimWidth == g_iAnimToW && g_iAnimHeight == g_iAnimToH)
         {
             // Steady-state: reposition at final size (no animation)
+            g_bOverlayEnabled = true;
+            g_iAnimToW    = targetW;
+            g_iAnimToH    = g_iMyHeight;
+            g_iAnimWidth  = targetW;
+            g_iAnimHeight = g_iMyHeight;
             SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, g_iMyWindowY,
                          g_iEffectiveWidth, g_iMyHeight,
                          SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -358,8 +364,13 @@ void MySetWindowPos(HWND hWnd, bool bShow)
     else
     {
         // Immediate hide (no zoom-out animation)
-        g_iAnimWidth = 0; g_iAnimHeight = 0;
-        g_iAnimToW = 0;   g_iAnimToH = 0;
+        if (!g_bOverlayEnabled)
+        {
+            // Full disable (ESC): reset animation state so next show animates
+            g_iAnimWidth = 0; g_iAnimHeight = 0;
+            g_iAnimToW = 0;   g_iAnimToH = 0;
+        }
+        // else: temp hide (no caret) -- preserve animation state so re-show is instant
         SetWindowPos(hWnd, HWND_TOPMOST, g_iMyWindowX, 4 * g_iMyWindowY,
                      0, 0, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
     }
@@ -1371,6 +1382,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             if (pKB->vkCode == VK_ESCAPE && !g_bTemporarilyHideMyWindow && g_ptCaret.y != 0)
             {
                 g_bTemporarilyHideMyWindow = true;
+                g_bOverlayEnabled = false;
                 PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
                             DETECT_REASON_KEY, (LPARAM)VK_ESCAPE);
                 return 1; // block ESC from reaching the target app

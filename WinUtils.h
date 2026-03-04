@@ -40,6 +40,7 @@ MYGLOBAL(int          , g_iTakeCaretSnapshot, 0       );
 MYGLOBAL(POINT        , g_ptCaretSnapshot   , {}      );
 
 MYGLOBAL(bool         , g_bTemporarilyHideMyWindow, true); // starts disabled; activated by typing 4 chars or arrow jiggle
+MYGLOBAL(bool         , g_bOverlayEnabled         , false); // true while overlay is active (typing/jiggle); false at start and after ESC
 
 MYGLOBAL(int          , g_iNewFocusedChild, 0);
 

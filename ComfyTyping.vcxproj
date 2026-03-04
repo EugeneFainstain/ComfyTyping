@@ -132,10 +132,12 @@
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="WinUtils.h" />
+    <ClInclude Include="IniReader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ComfyTyping.cpp" />
     <ClCompile Include="WinUtils.cpp" />
+    <ClCompile Include="IniReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ComfyTyping.rc" />
@@ -144,6 +146,12 @@
     <Image Include="ComfyTyping.ico" />
     <Image Include="small.ico" />
   </ItemGroup>
+  <ItemDefinitionGroup>
+    <PostBuildEvent>
+      <Command>move /Y "$(OutDir)ComfyTyping.exe" "$(ProjectDir)ComfyTyping.exe"</Command>
+      <Message>Moving ComfyTyping.exe to project directory</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

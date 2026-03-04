@@ -2,6 +2,7 @@
 //
 #include "framework.h"
 #include "WinUtils.h"
+#include "IniReader.h"
 
 #include <objbase.h>             // For COM (CoCreateInstance, etc.)
 #include <uiautomationclient.h>  // For IUIAutomation / TextPattern2
@@ -92,6 +93,28 @@ static int GetMethodsForWindow(HWND hwnd)
 
     strncpy_s(g_szAppExeName, exeName, _TRUNCATE);
 
+    // Strip ".exe" suffix for INI lookups (INI keys are base names only)
+    char baseName[MAX_PATH] = {};
+    strncpy_s(baseName, exeName, _TRUNCATE);
+    char* dot = strrchr(baseName, '.');
+    if (dot) *dot = '\0';
+
+    // INI access control: blacklist / whitelist / only-whitelisted mode
+    if (IsAppBlacklisted(baseName))
+    {
+        cachedMethods = 0;
+        OutputDebugFormatA("App '%s': blacklisted, skipping\n", exeName);
+        return cachedMethods;
+    }
+
+    if (IsOnlyWhitelistedMode() && !IsAppWhitelisted(baseName))
+    {
+        cachedMethods = 0;
+        OutputDebugFormatA("App '%s': not whitelisted (ONLY_WHITELISTED=1), skipping\n", exeName);
+        return cachedMethods;
+    }
+
+    // Per-app method table lookup (for fine-tuning detection flags)
     for (int i = 0; i < _countof(g_appConfigTable); i++)
     {
         if (strcmp(exeName, g_appConfigTable[i].exeName) == 0)

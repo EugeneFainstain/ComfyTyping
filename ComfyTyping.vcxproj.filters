@@ -30,12 +30,18 @@
     <ClInclude Include="WinUtils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="IniReader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ComfyTyping.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WinUtils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="IniReader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -7,6 +7,7 @@
 #include "resource.h"
 #include "ComfyTyping.h"
 #include "WinUtils.h"
+#include "IniReader.h"
 #include <iostream>  // for std::isprint
 #include <objbase.h> // for CoInitializeEx / CoUninitialize
 #include <dwmapi.h>  // for DwmSetWindowAttribute, DwmGetWindowAttribute
@@ -62,6 +63,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     SetProcessDPIAware();  // Enable DPI awareness (Windows 7+)
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     InitUIAutomation();
+    ReadConfiguration();
 
     // Initialize global strings
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);

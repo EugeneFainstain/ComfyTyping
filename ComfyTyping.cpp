@@ -1174,10 +1174,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 {
                     HDC hScreenDC = GetDC(NULL);
 #ifdef USE_CACHING_DC
-                    StretchBlt(hCacheDC, 0, 0, fullW, fullH, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
+                    int srcW = width / ZOOM + CAPTURE_WIDTH_PADDING * 2;
+                    int srcX = g_iSrcX - CAPTURE_WIDTH_PADDING;
+                    StretchBlt(hCacheDC, 0, 0, fullW, fullH, hScreenDC, srcX, g_iSrcY, srcW, height, SRCCOPY);
                     bCacheValid = true;
 #else
-                    StretchBlt(hdc, 0, 0, fullW, fullH, hScreenDC, g_iSrcX, g_iSrcY, width/ZOOM, height, SRCCOPY);
+                    int srcW = width / ZOOM + CAPTURE_WIDTH_PADDING * 2;
+                    int srcX = g_iSrcX - CAPTURE_WIDTH_PADDING;
+                    StretchBlt(hdc, 0, 0, fullW, fullH, hScreenDC, srcX, g_iSrcY, srcW, height, SRCCOPY);
 #endif
                     ReleaseDC(NULL, hScreenDC);
                 }
@@ -1206,17 +1210,38 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         StretchBlt(hdc, offsetX, offsetY, dstW, dstH,
                                    hCacheDC, 0, 0, fullW, fullH, SRCCOPY);
 
+                        #if EXTRA_BORDER_THICKNESS > 0
                         // Border around the growing content (matches DWM window border color)
                         COLORREF crBorder = 0;
                         if (FAILED(DwmGetWindowAttribute(hWnd, 34 /*DWMWA_BORDER_COLOR*/, &crBorder, sizeof(crBorder))))
                             crBorder = GetSysColor(COLOR_ACTIVEBORDER);
                         HBRUSH hBorderBrush = CreateSolidBrush(crBorder);
-                        RECT rcBorder = { offsetX, offsetY, offsetX + dstW, offsetY + dstH };
-                        FrameRect(hdc, &rcBorder, hBorderBrush);
+                        for (int b = 0; b < EXTRA_BORDER_THICKNESS; b++)
+                        {
+                            RECT rcBorder = { offsetX + b, offsetY + b, offsetX + dstW - b, offsetY + dstH - b };
+                            FrameRect(hdc, &rcBorder, hBorderBrush);
+                        }
                         DeleteObject(hBorderBrush);
+                        #endif
                     }
                     else if (!bAnimating)
+                    {
                         BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
+
+                        #if EXTRA_BORDER_THICKNESS > 0
+                        // Border around the steady-state content
+                        COLORREF crBorder = 0;
+                        if (FAILED(DwmGetWindowAttribute(hWnd, 34 /*DWMWA_BORDER_COLOR*/, &crBorder, sizeof(crBorder))))
+                            crBorder = GetSysColor(COLOR_ACTIVEBORDER);
+                        HBRUSH hBorderBrush = CreateSolidBrush(crBorder);
+                        for (int b = 0; b < EXTRA_BORDER_THICKNESS; b++)
+                        {
+                            RECT rcBorder = { b, b, fullW - b, fullH - b };
+                            FrameRect(hdc, &rcBorder, hBorderBrush);
+                        }
+                        DeleteObject(hBorderBrush);
+                        #endif
+                    }
                     // else: animation just started, dstW/dstH still 0 -- skip this frame
 #else
                     BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
@@ -1253,7 +1278,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 POINT ptClient = ptCurrent; ScreenToClient(hWnd, &ptClient);
 
-                POINT ptTarget = { ptClient.x / ZOOM + g_iSrcX, ptClient.y / ZOOM + g_iSrcY };
+                int srcW = g_iEffectiveWidth / ZOOM + CAPTURE_WIDTH_PADDING * 2;
+                POINT ptTarget = { ptClient.x * srcW / g_iEffectiveWidth + g_iSrcX - CAPTURE_WIDTH_PADDING,
+                                   ptClient.y / ZOOM + g_iSrcY };
 
                 POINT ptTargetAbs  = { (ptTarget.x  * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (ptTarget.y  * 65536 + g_iScreenHeight/2) / g_iScreenHeight };
                 POINT ptCurrentAbs = { (ptCurrent.x * 65536 + g_iScreenWidth/2) / g_iScreenWidth, (ptCurrent.y * 65536 + g_iScreenHeight/2) / g_iScreenHeight };

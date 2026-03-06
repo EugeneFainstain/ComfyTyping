@@ -30,6 +30,8 @@
 #define USE_ANIMATION
 #define USE_CACHING_DC
 #define ANIM_DURATION_MS     250    // Show/hide/resize animation duration
+#define EXTRA_BORDER_THICKNESS 3    // Extra border pixels drawn on top of native 1px border (0 = native only)
+#define CAPTURE_WIDTH_PADDING  4    // Extra pixels captured on each side of the source area (0 = exact fit)
 
 // Event-driven caret detection: hooks PostMessage instead of setting globals
 #define WM_APP_DETECT_CARET  (WM_APP + 1)

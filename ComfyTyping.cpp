@@ -1195,6 +1195,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 // --- Blit from cache to window ---
                 if (bCacheValid && !g_bFillCacheOnly)
                 {
+                    static COLORREF s_crBorder = GetSysColor(COLOR_ACTIVEBORDER);
 #ifdef USE_ANIMATION
                     int dstW = g_iAnimWidth;
                     int dstH = g_iAnimHeight;
@@ -1210,37 +1211,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         StretchBlt(hdc, offsetX, offsetY, dstW, dstH,
                                    hCacheDC, 0, 0, fullW, fullH, SRCCOPY);
 
-                        #if EXTRA_BORDER_THICKNESS > 0
-                        // Border around the growing content (matches DWM window border color)
-                        COLORREF crBorder = 0;
-                        if (FAILED(DwmGetWindowAttribute(hWnd, 34 /*DWMWA_BORDER_COLOR*/, &crBorder, sizeof(crBorder))))
-                            crBorder = GetSysColor(COLOR_ACTIVEBORDER);
-                        HBRUSH hBorderBrush = CreateSolidBrush(crBorder);
+                        HBRUSH hBorderBrush = CreateSolidBrush(s_crBorder);
                         for (int b = 0; b < EXTRA_BORDER_THICKNESS; b++)
                         {
                             RECT rcBorder = { offsetX + b, offsetY + b, offsetX + dstW - b, offsetY + dstH - b };
                             FrameRect(hdc, &rcBorder, hBorderBrush);
                         }
                         DeleteObject(hBorderBrush);
-                        #endif
                     }
                     else if (!bAnimating)
                     {
                         BitBlt(hdc, 0, 0, fullW, fullH, hCacheDC, 0, 0, SRCCOPY);
 
-                        #if EXTRA_BORDER_THICKNESS > 0
-                        // Border around the steady-state content
-                        COLORREF crBorder = 0;
-                        if (FAILED(DwmGetWindowAttribute(hWnd, 34 /*DWMWA_BORDER_COLOR*/, &crBorder, sizeof(crBorder))))
-                            crBorder = GetSysColor(COLOR_ACTIVEBORDER);
-                        HBRUSH hBorderBrush = CreateSolidBrush(crBorder);
+                        HBRUSH hBorderBrush = CreateSolidBrush(s_crBorder);
                         for (int b = 0; b < EXTRA_BORDER_THICKNESS; b++)
                         {
                             RECT rcBorder = { b, b, fullW - b, fullH - b };
                             FrameRect(hdc, &rcBorder, hBorderBrush);
                         }
                         DeleteObject(hBorderBrush);
-                        #endif
                     }
                     // else: animation just started, dstW/dstH still 0 -- skip this frame
 #else

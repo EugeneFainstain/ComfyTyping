@@ -21,6 +21,8 @@ WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
 void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
                            LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
+void CALLBACK WinEventProc_ForLocationChange(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
+                           LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -95,6 +97,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                                     0,                 // [in] DWORD        idProcess,
                                     0,                 // [in] DWORD        idThread,
                                     WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS | WINEVENT_SKIPOWNTHREAD );//[in] DWORD        dwFlags
+
+    HWINEVENTHOOK hLocationHook = SetWinEventHook(
+                                    EVENT_OBJECT_LOCATIONCHANGE,
+                                    EVENT_OBJECT_LOCATIONCHANGE,
+                                    NULL,
+                                    WinEventProc_ForLocationChange,
+                                    0, 0,
+                                    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS | WINEVENT_SKIPOWNTHREAD);
 
     HANDLE hHookThread = CreateThread(nullptr, 0, InputHookThreadProc, hInstance, 0, nullptr);
 
@@ -700,6 +710,46 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static bool  bSettleFromTyping = false;
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
 
+            // --- Window-relative caret offset (for drag/resize tracking) ---
+            static int  s_iCaretOffsetX = 0, s_iCaretOffsetY = 0;
+            static RECT s_rcWindowAtOffset = {};   // foreground window rect when offset was stored
+            static bool s_bHaveCaretOffset = false;
+
+            // --- Handle window move: apply stored offset, skip all detection ---
+            if (wParam == DETECT_REASON_WINDOWMOVE)
+            {
+                if (!s_bHaveCaretOffset || !g_bOverlayEnabled)
+                    break;
+
+                HWND hFG = GetForegroundWindow();
+                if (!hFG) break;
+                RECT rcWnd;
+                GetWindowRect(hFG, &rcWnd);
+
+                // Compute how much the window moved since offset was stored
+                int dx = rcWnd.left - s_rcWindowAtOffset.left;
+                int dy = rcWnd.top  - s_rcWindowAtOffset.top;
+                if (dx == 0 && dy == 0)
+                    break; // no actual movement
+
+                // Shift caret and container by the same delta
+                g_ptCaret.x += dx;
+                g_ptCaret.y += dy;
+                g_ptLastQueriedCaret.x += dx;
+                g_ptLastQueriedCaret.y += dy;
+                g_ptLastSettledCaret.x += dx;
+                g_ptLastSettledCaret.y += dy;
+                OffsetRect(&g_rcContainer, dx, dy);
+                OffsetRect(&g_rcLastQueriedContainer, dx, dy);
+                OffsetRect(&g_rcLastSettledContainer, dx, dy);
+                s_rcWindowAtOffset = rcWnd;
+
+                OutputDebugFormatA("  WindowMove: delta(%d,%d) -> caret(%d,%d)\n",
+                                   dx, dy, g_ptCaret.x, g_ptCaret.y);
+                UpdateOverlayWindow(hWnd);
+                break;
+            }
+
             // --- Print separator for new events (not settle ticks) ---
             if (wParam != DETECT_REASON_SETTLE)
                 OutputDebugFormatA("\n\n");
@@ -838,6 +888,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             else
                 g_ptCaret = g_ptLastQueriedCaret;
+
+            // Snapshot the foreground window position for drag tracking
+            if (g_ptCaret.y != 0 && g_hForegroundWindow)
+            {
+                GetWindowRect(g_hForegroundWindow, &s_rcWindowAtOffset);
+                s_bHaveCaretOffset = true;
+            }
 
             if (bCaretLossFallback)
             {
@@ -1392,6 +1449,24 @@ void CALLBACK WinEventProc_ForFocusedClientWnd(HWINEVENTHOOK hWinEventHook, DWOR
         {
             g_iNewFocusedChild   = 10;
             hPrevFocusedChildWnd = g_hFocusedChildWnd;
+        }
+    }
+}
+
+void CALLBACK WinEventProc_ForLocationChange(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
+                                             LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime)
+{
+    // Only care about top-level window moves (OBJID_WINDOW), and only for
+    // the foreground window (the one we're tracking).
+    if (event == EVENT_OBJECT_LOCATIONCHANGE && idObject == OBJID_WINDOW && idChild == CHILDID_SELF)
+    {
+        // Check if this is the foreground window or its root ancestor
+        HWND hFG = GetForegroundWindow();
+        if (!hFG) return;
+        HWND hRoot = GetAncestor(hFG, GA_ROOT);
+        if (hwnd == hFG || hwnd == hRoot)
+        {
+            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET, DETECT_REASON_WINDOWMOVE, 0);
         }
     }
 }

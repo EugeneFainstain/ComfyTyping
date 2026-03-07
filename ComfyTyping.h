@@ -40,6 +40,7 @@
 #define DETECT_REASON_SETTLE 2      // fired by settle timer to re-detect until caret stabilizes
 #define DETECT_REASON_TIMER  3      // fired by periodic 1s timer to refresh
 #define DETECT_REASON_ALT_UP 4      // Alt key released (Alt+Tab completed)
+#define DETECT_REASON_WINDOWMOVE 5  // foreground window moved/resized (EVENT_OBJECT_LOCATIONCHANGE)
 //#define UIA_LINE_LEVEL_EXPANSION   // Strategy 2: line-level MoveEndpointByUnit for VSCode .cpp/.h
 //#define UIA_SUBTREE_SEARCH         // FindFirst(TreeScope_Descendants) fallback — expensive, creates COM threads
 //#define NO_CONTAINER_FROM_HOOK

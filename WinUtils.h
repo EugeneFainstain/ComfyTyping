@@ -54,6 +54,10 @@ MYGLOBAL(bool         , g_bWaitForInputAfterToggle, false); // set after VSCode 
 MYGLOBAL(bool         , g_bAllowOptimizations , true); // false when SCROLL_LOCK is lit
 MYGLOBAL(bool         , g_bSettling           , false); // true while settle loop runs; suppresses desktop grab
 
+// Window-move tracking: shift caret/container when foreground window moves
+MYGLOBAL(bool         , g_bWindowMoveTracking , false); // true once we have a valid snapshot
+MYGLOBAL(RECT         , g_rcWindowAtSnapshot  , {}   ); // foreground window rect at last good caret
+
 // Zoom-in animation state (see block comment in ComfyTyping.cpp above AdvanceAnimation)
 MYGLOBAL(int          , g_iAnimWidth  , 0    ); // current animated width  (0..g_iAnimToW)
 MYGLOBAL(int          , g_iAnimHeight , 0    ); // current animated height (0..g_iAnimToH)

@@ -710,46 +710,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static bool  bSettleFromTyping = false;
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
 
-            // --- Window-relative caret offset (for drag/resize tracking) ---
-            static int  s_iCaretOffsetX = 0, s_iCaretOffsetY = 0;
-            static RECT s_rcWindowAtOffset = {};   // foreground window rect when offset was stored
-            static bool s_bHaveCaretOffset = false;
-
-            // --- Handle window move: apply stored offset, skip all detection ---
-            if (wParam == DETECT_REASON_WINDOWMOVE)
-            {
-                if (!s_bHaveCaretOffset || !g_bOverlayEnabled)
-                    break;
-
-                HWND hFG = GetForegroundWindow();
-                if (!hFG) break;
-                RECT rcWnd;
-                GetWindowRect(hFG, &rcWnd);
-
-                // Compute how much the window moved since offset was stored
-                int dx = rcWnd.left - s_rcWindowAtOffset.left;
-                int dy = rcWnd.top  - s_rcWindowAtOffset.top;
-                if (dx == 0 && dy == 0)
-                    break; // no actual movement
-
-                // Shift caret and container by the same delta
-                g_ptCaret.x += dx;
-                g_ptCaret.y += dy;
-                g_ptLastQueriedCaret.x += dx;
-                g_ptLastQueriedCaret.y += dy;
-                g_ptLastSettledCaret.x += dx;
-                g_ptLastSettledCaret.y += dy;
-                OffsetRect(&g_rcContainer, dx, dy);
-                OffsetRect(&g_rcLastQueriedContainer, dx, dy);
-                OffsetRect(&g_rcLastSettledContainer, dx, dy);
-                s_rcWindowAtOffset = rcWnd;
-
-                OutputDebugFormatA("  WindowMove: delta(%d,%d) -> caret(%d,%d)\n",
-                                   dx, dy, g_ptCaret.x, g_ptCaret.y);
-                UpdateOverlayWindow(hWnd);
-                break;
-            }
-
             // --- Print separator for new events (not settle ticks) ---
             if (wParam != DETECT_REASON_SETTLE)
                 OutputDebugFormatA("\n\n");
@@ -892,8 +852,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Snapshot the foreground window position for drag tracking
             if (g_ptCaret.y != 0 && g_hForegroundWindow)
             {
-                GetWindowRect(g_hForegroundWindow, &s_rcWindowAtOffset);
-                s_bHaveCaretOffset = true;
+                GetWindowRect(g_hForegroundWindow, &g_rcWindowAtSnapshot);
+                g_bWindowMoveTracking = true;
             }
 
             if (bCaretLossFallback)
@@ -1458,17 +1418,39 @@ void CALLBACK WinEventProc_ForLocationChange(HWINEVENTHOOK hWinEventHook, DWORD 
 {
     // Only care about top-level window moves (OBJID_WINDOW), and only for
     // the foreground window (the one we're tracking).
-    if (event == EVENT_OBJECT_LOCATIONCHANGE && idObject == OBJID_WINDOW && idChild == CHILDID_SELF)
-    {
-        // Check if this is the foreground window or its root ancestor
-        HWND hFG = GetForegroundWindow();
-        if (!hFG) return;
-        HWND hRoot = GetAncestor(hFG, GA_ROOT);
-        if (hwnd == hFG || hwnd == hRoot)
-        {
-            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET, DETECT_REASON_WINDOWMOVE, 0);
-        }
-    }
+    if (event != EVENT_OBJECT_LOCATIONCHANGE || idObject != OBJID_WINDOW || idChild != CHILDID_SELF)
+        return;
+    if (!g_bOverlayEnabled || !g_bWindowMoveTracking)
+        return;
+
+    HWND hFG = GetForegroundWindow();
+    if (!hFG) return;
+    HWND hRoot = GetAncestor(hFG, GA_ROOT);
+    if (hwnd != hFG && hwnd != hRoot)
+        return;
+
+    RECT rcWnd;
+    GetWindowRect(hFG, &rcWnd);
+
+    int dx = rcWnd.left - g_rcWindowAtSnapshot.left;
+    int dy = rcWnd.top  - g_rcWindowAtSnapshot.top;
+    if (dx == 0 && dy == 0)
+        return;
+
+    // Shift all caret and container globals by the movement delta
+    g_ptCaret.x += dx;
+    g_ptCaret.y += dy;
+    g_ptLastQueriedCaret.x += dx;
+    g_ptLastQueriedCaret.y += dy;
+    g_ptLastSettledCaret.x += dx;
+    g_ptLastSettledCaret.y += dy;
+    OffsetRect(&g_rcContainer, dx, dy);
+    OffsetRect(&g_rcLastQueriedContainer, dx, dy);
+    OffsetRect(&g_rcLastSettledContainer, dx, dy);
+    g_rcWindowAtSnapshot = rcWnd;
+
+    // The 16ms invalidate timer will repaint with updated coordinates.
+    // No need to call UpdateOverlayWindow here.
 }
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)

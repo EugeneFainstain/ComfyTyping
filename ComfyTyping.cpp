@@ -820,6 +820,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     break; // already settling or user was active recently
             }
 
+            // --- Rapid typing: skip expensive detection, just repaint ---
+            // During fast key repeat, DetectCaretAndContainer (~20-70ms) blocks
+            // the main thread and starves the repaint timer. The caret barely
+            // moves (one character), so just invalidate and let the settle timer
+            // do the full detection later.
+            if (bIsTypingEvent && g_bOverlayEnabled)
+            {
+                DWORD dwNow = GetTickCount();
+                if (dwNow - dwLastEventTick < 250)
+                {
+                    dwLastEventTick = dwNow;
+                    // Restart settle timer (will run full detection when typing stops)
+                    if (g_bSettling)
+                        KillTimer(hWnd, SETTLE_TIMER_ID);
+                    g_bSettling = false;
+                    bSettleFromTyping = true;
+                    hSettleFG = g_hForegroundWindow;
+                    iSettleCount = 0;
+                    SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
+                    // Force immediate repaint (WM_PAINT is lowest priority and
+                    // gets starved by the flood of keyboard hook PostMessages).
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    UpdateWindow(hWnd);
+                    break;
+                }
+            }
+
             // --- Query caret and container on every message ---
             g_bCaretMightHaveMoved = true;
             LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;

@@ -41,6 +41,10 @@ struct AppConfig
 static const AppConfig g_appConfigTable[] = {
     { "dummy_app.exe", METHOD_ALL },
 
+    { "devenv.exe"   , METHOD_ALL | APP_ID_DEVENV  },
+    { "code.exe"     , METHOD_ALL | APP_ID_CODE    },
+    { "msedge.exe"   , METHOD_ALL | APP_ID_BROWSER },
+
 //         { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
 //         { "code.exe", 0xFF },
 //     //    { "code.exe", 0xFF & (~CONTAINER_HOOK) & (~CONTAINER_ENUM) },
@@ -81,7 +85,7 @@ static int GetMethodsForWindow(HWND hwnd)
     static HWND  cachedHwnd = nullptr;
     static int   cachedMethods = METHOD_ALL;
 
-    if (g_bAllowOptimizations && hwnd == cachedHwnd)
+    if (hwnd == cachedHwnd)
         return cachedMethods;
 
     cachedHwnd = hwnd;
@@ -139,6 +143,11 @@ int GetCaretMethodsForWindow(HWND hwnd)
 #else
     return CARET_ALL;
 #endif
+}
+
+int GetAppId()
+{
+    return GetMethodsForWindow(g_hForegroundWindow) & APP_ID_MASK;
 }
 
 bool ShouldReuseCaretOnTypingLoss(HWND hwnd)
@@ -699,6 +708,7 @@ RECT GetContainerRectFromUIA(int x, int y)
     // of the current rect walks up to the enclosing container.
     POINT pt = { x, y };
     RECT prevRc = {};
+    const RECT nullRc = {};
 
     for (int iter = 0; iter < 8; iter++)  // safety limit
     {
@@ -733,18 +743,38 @@ RECT GetContainerRectFromUIA(int x, int y)
         SysFreeString(bstrName);
         SysFreeString(bstrClass);
 
-        // Stop if we got the same rect twice in a row
-        if (rc.left == prevRc.left && rc.top == prevRc.top &&
-            rc.right == prevRc.right && rc.bottom == prevRc.bottom)
-            break;
+        if( 0==memcmp(&prevRc, &nullRc, sizeof(RECT) ) )
+        {
+            prevRc = rc; // Must initialize prevRc...
+        }
+        else
+        {
+            // Stop if we got the same rect twice in a row
+            if (rc.left == prevRc.left && rc.top == prevRc.top &&
+                rc.right == prevRc.right && rc.bottom == prevRc.bottom)
+                break;
+        }
 
-        if ((rc.right - rc.left) > 50 && (rc.bottom - rc.top) > 10)
+        if( g_bAppIsCode )
             result = rc;
+        else
+        {
+            // By iterating this way, we are looking for a container that is SAME OR LARGER than the one we got
+            // initially.
+            if( (rc.right  >= prevRc.right)  &&
+                (rc.left   <= prevRc.left)   &&
+                (rc.top    <= prevRc.top)    &&
+                (rc.bottom >= prevRc.bottom) )
+                result = rc;
+        }
 
         prevRc = rc;
 
-        // Next iteration: try 0?1px inside the left edge, keep original Y
+        // Next iteration X: try to find a larger container starting from the left edge
         pt.x = rc.left + 0;// + 1;
+
+        // Next iteration Y: use the middle Y of the current container
+        pt.y = (rc.top + rc.bottom + 1) / 2;
     }
 
     return result;

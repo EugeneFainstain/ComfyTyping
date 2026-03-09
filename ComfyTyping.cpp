@@ -403,6 +403,17 @@ void MySetWindowPos(HWND hWnd, bool bShow)
 void HideMyWindow(HWND hWnd) { MySetWindowPos(hWnd, false); g_ptCaret = {}; }
 void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
 
+static void AssignForegroundWindow() // Sets the g_hForegroundWindow
+{
+    g_hForegroundWindow = GetForegroundWindow();
+
+    const int appId = g_hForegroundWindow ? GetAppId() : 0;
+
+    g_bAppIsDevEnv  = (appId == APP_ID_DEVENV);
+    g_bAppIsCode    = (appId == APP_ID_CODE);
+    g_bAppIsBrowser = (appId == APP_ID_BROWSER);
+}
+
 // ---------------------------------------------------------------------------
 // Detect caret + container, update globals, optionally show/hide window.
 // Called from WM_APP_DETECT_CARET (event-driven) and CARET_TIMER (periodic).
@@ -412,7 +423,13 @@ void ShowMyWindow(HWND hWnd) { MySetWindowPos(hWnd, true ); }
 // Does NOT touch g_ptCaret, g_rcContainer, or g_iEffectiveWidth.
 static void DetectCaretAndContainer(HWND hWnd)
 {
-    if (!(g_hForegroundWindow = GetForegroundWindow()))
+    //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
+    AssignForegroundWindow(); // Sets the g_hForegroundWindow
+    //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
+
+    if( g_hForegroundWindow == NULL )
         return; // can be NULL during focus transitions
 
     g_fDpiScaleFactor = GetDpiScaleFactor(g_hForegroundWindow);
@@ -1027,8 +1044,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     {
                         g_rcLastSettledContainer = g_rcLastQueriedContainer;
                         g_rcContainer            = g_rcLastSettledContainer;
-                        OutputDebugFormatA("  Settled:  caret@(%d,%d), container %dx%d ########################################\n",
+                        OutputDebugFormatA("  Settled:  caret@(%d,%d), container@(%d,%d,%d,%d), size %dx%d ########################################\n",
                                            g_ptCaret.x, g_ptCaret.y,
+                                           g_rcContainer.left, g_rcContainer.top,
+                                           g_rcContainer.right, g_rcContainer.bottom,
                                            g_rcContainer.right - g_rcContainer.left,
                                            g_rcContainer.bottom - g_rcContainer.top);
                     }

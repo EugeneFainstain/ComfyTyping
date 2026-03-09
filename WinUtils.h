@@ -69,6 +69,10 @@ MYGLOBAL(int          , g_iAnimToH    , 0    ); // target height (= g_iMyHeight)
 MYGLOBAL(bool         , g_bFillCacheOnly, false); // when true, WM_PAINT grabs desktop to cache but skips blit
 MYGLOBAL(HDC          , g_hAnimBgDC , NULL ); // captured desktop behind overlay, painted once at animation start
 
+MYGLOBAL(bool         , g_bAppIsDevEnv , false);
+MYGLOBAL(bool         , g_bAppIsCode   , false);
+MYGLOBAL(bool         , g_bAppIsBrowser, false);
+
 #ifdef WIN_UTILS_CPP
     char g_szAppExeName[64] = {};
 #else
@@ -94,6 +98,12 @@ MYGLOBAL(HDC          , g_hAnimBgDC , NULL ); // captured desktop behind overlay
 
 #define BEHAVIOR_ALL (REUSE_CARET_ON_TYPING_LOSS | SKIP_CONTAINER_UPDATE_ON_TYPING)
 
+// Specific applications
+#define APP_ID_DEVENV  0x01000
+#define APP_ID_CODE    0x02000
+#define APP_ID_BROWSER 0x04000
+#define APP_ID_MASK    0xFF000
+
 #ifdef NO_CONTAINER_FROM_HOOK
     #define METHOD_ALL ((CARET_ALL | CONTAINER_ALL | BEHAVIOR_ALL) & ~CONTAINER_HOOK)
 #else
@@ -114,6 +124,7 @@ int   GetCaretMethodsForWindow(HWND hwnd);
 HWND  FindSmallestChildContainingXY(HWND hwndParent, int x, int y, int* pChildCount = nullptr);
 RECT  GetContainerRectFromUIA(int x, int y);
 int   GetContainerMethodsForWindow(HWND hwnd);
+int   GetAppId();
 bool  ShouldReuseCaretOnTypingLoss(HWND hwnd);
 bool  ShouldSkipContainerUpdateOnTyping(HWND hwnd);
 void  EnableRoundedCorners(HWND hwnd);

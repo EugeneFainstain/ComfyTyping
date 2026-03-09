@@ -913,7 +913,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             else if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE) || (wParam == DETECT_REASON_ALT_UP))
             {
                 // Determine if this is a context switch (long timeout needed)
-                bool bLongTimeout = (g_hForegroundWindow != hPrevSettledFG) || (wParam == DETECT_REASON_ALT_UP);
+                bool bLongTimeout = (g_hForegroundWindow != hPrevSettledFG) || (wParam == DETECT_REASON_ALT_UP) || g_bAppIsBrowser;
                 if (wParam == DETECT_REASON_MOUSE)
                 {
                     int clickX = (short)LOWORD(lParam);
@@ -1031,7 +1031,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     g_ptLastSettledCaret = g_ptLastQueriedCaret;
 
                     bool bSkipContainer = bSettleFromTyping &&
-                        ShouldSkipContainerUpdateOnTyping(g_hForegroundWindow);
+                        ShouldSkipContainerUpdateOnTyping(g_hForegroundWindow) && !g_bAppIsBrowser;
                     if (bSkipContainer)
                     {
                         g_rcContainer = g_rcLastSettledContainer;

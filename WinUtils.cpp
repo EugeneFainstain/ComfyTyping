@@ -44,6 +44,8 @@ static const AppConfig g_appConfigTable[] = {
     { "devenv.exe"   , METHOD_ALL | APP_ID_DEVENV  },
     { "code.exe"     , METHOD_ALL | APP_ID_CODE    },
     { "msedge.exe"   , METHOD_ALL | APP_ID_BROWSER },
+    { "chrome.exe"   , METHOD_ALL | APP_ID_BROWSER },
+    { "firefox.exe"  , METHOD_ALL | APP_ID_BROWSER },
 
 //         { "devenv.exe",          CARET_GTHI | CARET_IACC |                              CONTAINER_ENUM | CONTAINER_UIA },
 //         { "code.exe", 0xFF },
@@ -773,8 +775,8 @@ RECT GetContainerRectFromUIA(int x, int y)
         // Next iteration X: try to find a larger container starting from the left edge
         pt.x = rc.left + 0;// + 1;
 
-        // Next iteration Y: use the middle Y of the current container
-        pt.y = (rc.top + rc.bottom + 1) / 2;
+        // Next iteration Y: use the upper-left corner of the current container
+        pt.y = rc.top;
     }
 
     return result;

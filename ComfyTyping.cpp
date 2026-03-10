@@ -740,7 +740,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 bool  bPrintableKey = mappedChar && std::isprint(mappedChar);
                 bIsTypingEvent = bPrintableKey || vk == VK_RETURN || vk == VK_TAB || vk == VK_BACK || vk == VK_DELETE
                                  || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN
-                                /* || vk == VK_HOME */ || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_INSERT; // Not VK_HOME - because we want to "refresh" the container size when it is pressed...
+                                 || vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_INSERT;
             }
 
             // --- Process event flags (key/mouse only, not settle ticks) ---
@@ -1031,7 +1031,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     g_ptLastSettledCaret = g_ptLastQueriedCaret;
 
                     bool bSkipContainer = bSettleFromTyping &&
-                        ShouldSkipContainerUpdateOnTyping(g_hForegroundWindow) && !g_bAppIsBrowser;
+                        ShouldSkipContainerUpdateOnTyping(g_hForegroundWindow);
+
+                    if( bSkipContainer )
+                    {
+                        // Check if the container size wants to increase (in the middle of typing)
+                        if( g_rcLastQueriedContainer.right - g_rcLastQueriedContainer.left > g_rcLastSettledContainer.right - g_rcLastSettledContainer.left )
+                        {
+                            OutputDebugFormatA("Un-skipping container update on width increase!!! %%%%%%%%%%%%%%%\n");
+                            bSkipContainer = false;
+                        }
+                    }
+
                     if (bSkipContainer)
                     {
                         g_rcContainer = g_rcLastSettledContainer;
@@ -1042,8 +1053,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     }
                     else
                     {
-                        g_rcLastSettledContainer = g_rcLastQueriedContainer;
-                        g_rcContainer            = g_rcLastSettledContainer;
+                        g_rcContainer = g_rcLastSettledContainer = g_rcLastQueriedContainer;
                         OutputDebugFormatA("  Settled:  caret@(%d,%d), container@(%d,%d,%d,%d), size %dx%d ########################################\n",
                                            g_ptCaret.x, g_ptCaret.y,
                                            g_rcContainer.left, g_rcContainer.top,

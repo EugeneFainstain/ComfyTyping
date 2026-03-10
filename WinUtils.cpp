@@ -282,8 +282,8 @@ static bool GetPositionFromTextRange(IUIAutomationTextRange* pRange, POINT& resu
         // Strategy 1: character-level expansion (works for most UIA providers)
         struct { TextPatternRangeEndpoint ep; TextUnit unit; int dir; const char* desc; }
         charAttempts[] = {
-            { TextPatternRangeEndpoint_End,   TextUnit_Character,  1, "fwd char"  },
             { TextPatternRangeEndpoint_Start, TextUnit_Character, -1, "bwd char"  },
+            { TextPatternRangeEndpoint_End,   TextUnit_Character,  1, "fwd char"  },
         };
 
         for (int i = 0; i < _countof(charAttempts) && count < 4; i++)
@@ -776,7 +776,8 @@ RECT GetContainerRectFromUIA(int x, int y)
         pt.x = rc.left + 0;// + 1;
 
         // Next iteration Y: use the upper-left corner of the current container
-        pt.y = rc.top;
+        if( !g_bAppIsCode )
+            pt.y = rc.top;
     }
 
     return result;

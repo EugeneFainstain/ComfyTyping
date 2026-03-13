@@ -112,6 +112,9 @@ MYGLOBAL(bool         , g_bAppIsBrowser, false);
 
 void OutputDebugFormatA(const char* format, ...);
 void DebugTraceA(const char* format, ...);
+void StartBufferingDebugOutput();
+void PrintBufferedDebugOutput();
+void ClearBufferedDebugOutput();
 
 float GetDpiScaleFactor(HWND hWnd);
 POINT GetCaretPosition(HWND* pCaretWnd = nullptr);

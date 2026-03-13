@@ -421,7 +421,7 @@ static void AssignForegroundWindow() // Sets the g_hForegroundWindow
 // ---------------------------------------------------------------------------
 // Query caret and container from the system. Writes to g_ptLastQueriedCaret / g_rcLastQueriedContainer.
 // Does NOT touch g_ptCaret, g_rcContainer, or g_iEffectiveWidth.
-static void DetectCaretAndContainer(HWND hWnd)
+static void DetectCaretAndContainer(HWND hWnd, const char* reason = "")
 {
     //////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////
@@ -451,7 +451,7 @@ static void DetectCaretAndContainer(HWND hWnd)
         bool bCaretFromAccessibility = false;
         int methods = GetCaretMethodsForWindow(g_hForegroundWindow);
 
-        OutputDebugFormatA("======== APP: %s ========\n", g_szAppExeName);
+        OutputDebugFormatA("======== APP: %s [%s] ========\n", g_szAppExeName, reason);
 
         // --- Caret detection chain ---
         if (methods & CARET_GTHI)
@@ -727,8 +727,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static bool  bSettleFromTyping = false;
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
 
-            // --- Print separator for new events (not settle ticks) ---
-            if (wParam != DETECT_REASON_SETTLE)
+            // --- Print separator for new events (not settle or timer) ---
+            if (wParam != DETECT_REASON_SETTLE && wParam != DETECT_REASON_TIMER)
                 OutputDebugFormatA("\n\n");
 
             // --- Classify typing events for caret-loss fallback ---
@@ -866,13 +866,71 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // --- Query caret and container on every message ---
             g_bCaretMightHaveMoved = true;
+            bool bTimerDetect = (wParam == DETECT_REASON_TIMER);
+            if (bTimerDetect) StartBufferingDebugOutput();
             LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
             QueryPerformanceCounter(&llDetectStart);
-            DetectCaretAndContainer(hWnd);
+            DetectCaretAndContainer(hWnd, DetectReasonToString((int)wParam));
             QueryPerformanceCounter(&llDetectEnd);
             QueryPerformanceFrequency(&llDetectFreq);
             float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
-            OutputDebugFormatA("  detect=%.2fms\n", detectMs);
+            if (!bTimerDetect) OutputDebugFormatA("  detect=%.2fms\n", detectMs);
+
+            // --- Timer: conservative update only ---
+            // Timer is only allowed to: a) increase container width, b) update caret Y.
+            // Everything else (caret loss, container shrink, caret X change) is ignored.
+            // Suppress debug output if results are identical to previous timer invocation.
+            if (wParam == DETECT_REASON_TIMER)
+            {
+                static POINT s_ptPrevTimerCaret = {};
+                static RECT  s_rcPrevTimerContainer = {};
+
+                bool bSameAsPrev = (g_ptLastQueriedCaret.x == s_ptPrevTimerCaret.x &&
+                                    g_ptLastQueriedCaret.y == s_ptPrevTimerCaret.y &&
+                                    g_rcLastQueriedContainer.left   == s_rcPrevTimerContainer.left &&
+                                    g_rcLastQueriedContainer.right  == s_rcPrevTimerContainer.right &&
+                                    g_rcLastQueriedContainer.top    == s_rcPrevTimerContainer.top &&
+                                    g_rcLastQueriedContainer.bottom == s_rcPrevTimerContainer.bottom);
+                s_ptPrevTimerCaret     = g_ptLastQueriedCaret;
+                s_rcPrevTimerContainer = g_rcLastQueriedContainer;
+
+                if (bSameAsPrev)
+                {
+                    ClearBufferedDebugOutput();
+                    break;  // identical to last timer tick - nothing to log or do
+                }
+
+                // a) Increase container width only
+                int queriedW = g_rcLastQueriedContainer.right - g_rcLastQueriedContainer.left;
+                int settledW = g_rcLastSettledContainer.right  - g_rcLastSettledContainer.left;
+                bool bWidthIncreased = (queriedW > settledW && g_rcLastQueriedContainer.right != 0);
+
+                // b) Update caret Y (vertical scrolling)
+                bool bCaretYChanged = (g_ptLastQueriedCaret.y != 0 && g_ptLastQueriedCaret.y != g_ptCaret.y);
+
+                if (bWidthIncreased || bCaretYChanged)
+                {
+                    // Results changed - print the buffered detection output
+                    PrintBufferedDebugOutput();
+                    OutputDebugFormatA("  detect=%.2fms\n", detectMs);
+                    if (bWidthIncreased)
+                    {
+                        OutputDebugFormatA("  Timer: container width increased %d -> %d\n", settledW, queriedW);
+                        g_rcLastSettledContainer = g_rcLastQueriedContainer;
+                        g_rcContainer            = g_rcLastQueriedContainer;
+                    }
+                    if (bCaretYChanged)
+                    {
+                        OutputDebugFormatA("  Timer: caret Y updated %d -> %d\n", g_ptCaret.y, g_ptLastQueriedCaret.y);
+                        g_ptCaret.y = g_ptLastQueriedCaret.y;
+                        g_ptLastSettledCaret.y = g_ptLastQueriedCaret.y;
+                    }
+                    UpdateOverlayWindow(hWnd);
+                }
+                else
+                    ClearBufferedDebugOutput();
+                break;
+            }
 
             // --- Promote caret (with typing-loss fallback) ---
             // Only reuse the settled caret if the caret was lost during a typing-related
@@ -964,17 +1022,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         g_rcContainer = g_rcLastQueriedContainer;
                     UpdateOverlayWindow(hWnd);
                 }
-            }
-            else if (wParam == DETECT_REASON_TIMER)
-            {
-                // Periodic refresh: start a settle run (always freeze)
-                g_bSettling = true;
-                bSettleFromTyping = false;
-                hSettleFG = g_hForegroundWindow;
-                ptPrevQueryCaret     = g_ptLastQueriedCaret;
-                rcPrevQueryContainer = g_rcLastQueriedContainer;
-                iSettleCount = 0;
-                SetTimer(hWnd, SETTLE_TIMER_ID, SETTLE_TIMER_MS, NULL);
             }
             else // wParam == DETECT_REASON_SETTLE
             {

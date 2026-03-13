@@ -22,7 +22,7 @@
 #define CARET_TIMER_ID       1002   // Unique timer ID
 
 //#ifdef _DEBUG
-    #define CARET_TIMER_INTERVAL 0 //100000   // Background poll (not the main driver; event-driven detection handles most updates)
+    #define CARET_TIMER_INTERVAL 1000 //100000   // Background poll (not the main driver; event-driven detection handles most updates)
 //#else
 //    #define CARET_TIMER_INTERVAL 100      // Background poll (not the main driver; event-driven detection handles most updates)
 //#endif
@@ -35,11 +35,21 @@
 
 // Event-driven caret detection: hooks PostMessage instead of setting globals
 #define WM_APP_DETECT_CARET  (WM_APP + 1)
-#define DETECT_REASON_KEY    0      // lParam = virtual key code
-#define DETECT_REASON_MOUSE  1
-#define DETECT_REASON_SETTLE 2      // fired by settle timer to re-detect until caret stabilizes
-#define DETECT_REASON_TIMER  3      // fired by periodic 1s timer to refresh
-#define DETECT_REASON_ALT_UP 4      // Alt key released (Alt+Tab completed)
+// X-macro list of detect reasons
+#define DETECT_REASONS \
+    X(DETECT_REASON_KEY,     0) /* lParam = virtual key code */ \
+    X(DETECT_REASON_MOUSE,   1) \
+    X(DETECT_REASON_SETTLE,  2) /* fired by settle timer to re-detect until caret stabilizes */ \
+    X(DETECT_REASON_TIMER,   3) /* fired by periodic 1s timer to refresh */ \
+    X(DETECT_REASON_ALT_UP,  4) /* Alt key released (Alt+Tab completed) */
+
+#define X(name, val) static const int name = val;
+DETECT_REASONS
+#undef X
+
+#define X(name, val) case val: return #name;
+inline const char* DetectReasonToString(int r) { switch(r) { DETECT_REASONS default: return "?"; } }
+#undef X
 //#define UIA_LINE_LEVEL_EXPANSION   // Strategy 2: line-level MoveEndpointByUnit for VSCode .cpp/.h
 //#define UIA_SUBTREE_SEARCH         // FindFirst(TreeScope_Descendants) fallback — expensive, creates COM threads
 //#define NO_CONTAINER_FROM_HOOK

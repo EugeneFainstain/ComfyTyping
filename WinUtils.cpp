@@ -162,6 +162,32 @@ bool ShouldSkipContainerUpdateOnTyping(HWND hwnd)
     return (GetMethodsForWindow(hwnd) & SKIP_CONTAINER_UPDATE_ON_TYPING) != 0;
 }
 
+// --- Debug output buffering (per-thread via TLS) ---
+static const int MAX_BUFFERED_LINES = 64;
+static __declspec(thread) char  t_debugLines[MAX_BUFFERED_LINES][256];
+static __declspec(thread) int   t_debugLineCount = 0;
+static __declspec(thread) bool  t_bBuffering = false;
+
+void StartBufferingDebugOutput()
+{
+    t_bBuffering = true;
+    t_debugLineCount = 0;
+}
+
+void PrintBufferedDebugOutput()
+{
+    t_bBuffering = false;
+    for (int i = 0; i < t_debugLineCount; i++)
+        OutputDebugStringA(t_debugLines[i]);
+    t_debugLineCount = 0;
+}
+
+void ClearBufferedDebugOutput()
+{
+    t_bBuffering = false;
+    t_debugLineCount = 0;
+}
+
 void OutputDebugFormatA(const char* format, ...)
 {
     if (GetKeyState(VK_CAPITAL) & 0x0001)  // CAPS LOCK on = suppress debug output
@@ -172,7 +198,14 @@ void OutputDebugFormatA(const char* format, ...)
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    OutputDebugStringA(buffer);
+
+    if (t_bBuffering)
+    {
+        if (t_debugLineCount < MAX_BUFFERED_LINES)
+            strncpy_s(t_debugLines[t_debugLineCount++], 256, buffer, _TRUNCATE);
+    }
+    else
+        OutputDebugStringA(buffer);
 }
 
 void DebugTraceA(const char* format, ...)

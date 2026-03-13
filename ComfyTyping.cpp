@@ -1580,9 +1580,14 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
         else if (wParam == WM_LBUTTONUP || wParam == WM_RBUTTONUP || wParam == WM_MBUTTONUP)
         {
             g_bMouseButtonDown = false;
-            MSLLHOOKSTRUCT *pMS = (MSLLHOOKSTRUCT *)lParam;
-            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                        DETECT_REASON_MOUSE_BUTTON_UP, MAKELPARAM(pMS->pt.x, pMS->pt.y));
+            // Skip detection if our overlay is the foreground window (e.g. user
+            // clicked on the overlay to reposition the cursor in the underlying app)
+            if (GetForegroundWindow() != g_myWindowHandle)
+            {
+                MSLLHOOKSTRUCT *pMS = (MSLLHOOKSTRUCT *)lParam;
+                PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                            DETECT_REASON_MOUSE_BUTTON_UP, MAKELPARAM(pMS->pt.x, pMS->pt.y));
+            }
         }
     }
     return res;

@@ -726,6 +726,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static int   iSettleCount = 0;
             static bool  bSettleFromTyping = false;
             static DWORD dwLastEventTick = 0;  // for no-freeze window (rapid events skip freeze)
+            static DWORD dwLastNonTimerEventTick = 0;
+
+            // --- Block all processing while mouse button is held down ---
+            if (g_bMouseButtonDown)
+                break;
+
+            if (wParam != DETECT_REASON_TIMER)
+                dwLastNonTimerEventTick = GetTickCount();
 
             // --- Print separator for new events (not settle or timer) ---
             if (wParam != DETECT_REASON_SETTLE && wParam != DETECT_REASON_TIMER)
@@ -733,7 +741,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // --- Classify typing events for caret-loss fallback ---
             bool bIsTypingEvent = false;
-            if (wParam == DETECT_REASON_KEY)
+            if (wParam == DETECT_REASON_KEY_DOWN || wParam == DETECT_REASON_KEY_UP)
             {
                 DWORD vk = (DWORD)lParam;
                 UINT  mappedChar    = MapVirtualKey(vk, MAPVK_VK_TO_CHAR);
@@ -744,7 +752,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
 
             // --- Process event flags (key/mouse only, not settle ticks) ---
-            if (wParam == DETECT_REASON_KEY)
+            if (wParam == DETECT_REASON_KEY_DOWN || wParam == DETECT_REASON_KEY_UP)
             {
                 DWORD vk = (DWORD)lParam;
                 UINT  mappedChar    = MapVirtualKey(vk, MAPVK_VK_TO_CHAR);
@@ -760,7 +768,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 static DWORD s_arrowTicks[4] = {};      // arrow timestamps
                 static int   s_iArrowCount = 0;         // arrow keys recorded (0-4)
 
-                if (vk == VK_ESCAPE)
+                if( wParam == DETECT_REASON_KEY_UP )
+                {
+                    // Ignore DETECT_REASON_KEY_UP when looking to activate the overlay
+                }
+                else if (vk == VK_ESCAPE)
                 {
                     // Hook already blocked ESC & hid overlay. Just reset counters.
                     s_iTypingCount = 0;
@@ -816,7 +828,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     s_iArrowCount  = 0;
                 }
             }
-            else if (wParam == DETECT_REASON_MOUSE)
+            else if (wParam == DETECT_REASON_MOUSE_BUTTON_UP)
             {
                 // Hit-test: skip detection for title bar / buttons / scrollbars
                 int clickX = (short)LOWORD(lParam);
@@ -829,12 +841,38 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 g_bWaitForInputAfterToggle = false;
             }
 
-            // --- Handle periodic timer: skip if settling or recent user input ---
+            // --- Timer: conservative update only ---
+            // Timer is only allowed to update caret Y (vertical scrolling).
+            // Everything else (caret loss, container changes, caret X) is ignored.
+            // Debug output is buffered and only printed when caret Y actually changes.
             if (wParam == DETECT_REASON_TIMER)
             {
                 DWORD dwNow = GetTickCount();
-                if (g_bSettling || (dwNow - dwLastEventTick < 250))
-                    break; // already settling or user was active recently
+                if (g_bSettling || (dwNow - dwLastNonTimerEventTick < CARET_TIMER_INTERVAL))
+                    break;
+
+                StartBufferingDebugOutput();
+                g_bCaretMightHaveMoved = true;
+                LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
+                QueryPerformanceCounter(&llDetectStart);
+                DetectCaretAndContainer(hWnd, DetectReasonToString((int)wParam));
+                QueryPerformanceCounter(&llDetectEnd);
+                QueryPerformanceFrequency(&llDetectFreq);
+                float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
+
+                bool bCaretYChanged = (g_ptLastQueriedCaret.y != 0 && g_ptLastQueriedCaret.y != g_ptCaret.y);
+                if (bCaretYChanged)
+                {
+                    PrintBufferedDebugOutput();
+                    OutputDebugFormatA("  detect=%.2fms\n", detectMs);
+                    OutputDebugFormatA("  Timer: caret Y updated %d -> %d\n", g_ptCaret.y, g_ptLastQueriedCaret.y);
+                    g_ptCaret.y = g_ptLastQueriedCaret.y;
+                    g_ptLastSettledCaret.y = g_ptLastQueriedCaret.y;
+                    UpdateOverlayWindow(hWnd);
+                }
+                else
+                    ClearBufferedDebugOutput();
+                break;
             }
 
             // --- Rapid typing: skip expensive detection, just repaint ---
@@ -866,71 +904,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // --- Query caret and container on every message ---
             g_bCaretMightHaveMoved = true;
-            bool bTimerDetect = (wParam == DETECT_REASON_TIMER);
-            if (bTimerDetect) StartBufferingDebugOutput();
             LARGE_INTEGER llDetectStart, llDetectEnd, llDetectFreq;
             QueryPerformanceCounter(&llDetectStart);
             DetectCaretAndContainer(hWnd, DetectReasonToString((int)wParam));
             QueryPerformanceCounter(&llDetectEnd);
             QueryPerformanceFrequency(&llDetectFreq);
             float detectMs = (float)(llDetectEnd.QuadPart - llDetectStart.QuadPart) * 1000.0f / llDetectFreq.QuadPart;
-            if (!bTimerDetect) OutputDebugFormatA("  detect=%.2fms\n", detectMs);
-
-            // --- Timer: conservative update only ---
-            // Timer is only allowed to: a) increase container width, b) update caret Y.
-            // Everything else (caret loss, container shrink, caret X change) is ignored.
-            // Suppress debug output if results are identical to previous timer invocation.
-            if (wParam == DETECT_REASON_TIMER)
-            {
-                static POINT s_ptPrevTimerCaret = {};
-                static RECT  s_rcPrevTimerContainer = {};
-
-                bool bSameAsPrev = (g_ptLastQueriedCaret.x == s_ptPrevTimerCaret.x &&
-                                    g_ptLastQueriedCaret.y == s_ptPrevTimerCaret.y &&
-                                    g_rcLastQueriedContainer.left   == s_rcPrevTimerContainer.left &&
-                                    g_rcLastQueriedContainer.right  == s_rcPrevTimerContainer.right &&
-                                    g_rcLastQueriedContainer.top    == s_rcPrevTimerContainer.top &&
-                                    g_rcLastQueriedContainer.bottom == s_rcPrevTimerContainer.bottom);
-                s_ptPrevTimerCaret     = g_ptLastQueriedCaret;
-                s_rcPrevTimerContainer = g_rcLastQueriedContainer;
-
-                if (bSameAsPrev)
-                {
-                    ClearBufferedDebugOutput();
-                    break;  // identical to last timer tick - nothing to log or do
-                }
-
-                // a) Increase container width only
-                int queriedW = g_rcLastQueriedContainer.right - g_rcLastQueriedContainer.left;
-                int settledW = g_rcLastSettledContainer.right  - g_rcLastSettledContainer.left;
-                bool bWidthIncreased = (queriedW > settledW && g_rcLastQueriedContainer.right != 0);
-
-                // b) Update caret Y (vertical scrolling)
-                bool bCaretYChanged = (g_ptLastQueriedCaret.y != 0 && g_ptLastQueriedCaret.y != g_ptCaret.y);
-
-                if (bWidthIncreased || bCaretYChanged)
-                {
-                    // Results changed - print the buffered detection output
-                    PrintBufferedDebugOutput();
-                    OutputDebugFormatA("  detect=%.2fms\n", detectMs);
-                    if (bWidthIncreased)
-                    {
-                        OutputDebugFormatA("  Timer: container width increased %d -> %d\n", settledW, queriedW);
-                        g_rcLastSettledContainer = g_rcLastQueriedContainer;
-                        g_rcContainer            = g_rcLastQueriedContainer;
-                    }
-                    if (bCaretYChanged)
-                    {
-                        OutputDebugFormatA("  Timer: caret Y updated %d -> %d\n", g_ptCaret.y, g_ptLastQueriedCaret.y);
-                        g_ptCaret.y = g_ptLastQueriedCaret.y;
-                        g_ptLastSettledCaret.y = g_ptLastQueriedCaret.y;
-                    }
-                    UpdateOverlayWindow(hWnd);
-                }
-                else
-                    ClearBufferedDebugOutput();
-                break;
-            }
+            OutputDebugFormatA("  detect=%.2fms\n", detectMs);
 
             // --- Promote caret (with typing-loss fallback) ---
             // Only reuse the settled caret if the caret was lost during a typing-related
@@ -968,11 +948,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 }
                 UpdateOverlayWindow(hWnd);
             }
-            else if ((wParam == DETECT_REASON_KEY) || (wParam == DETECT_REASON_MOUSE) || (wParam == DETECT_REASON_ALT_UP))
+            else if ((wParam == DETECT_REASON_KEY_DOWN) || (wParam == DETECT_REASON_KEY_UP) || (wParam == DETECT_REASON_MOUSE_BUTTON_UP) || (wParam == DETECT_REASON_ALT_UP))
             {
                 // Determine if this is a context switch (long timeout needed)
                 bool bLongTimeout = (g_hForegroundWindow != hPrevSettledFG) || (wParam == DETECT_REASON_ALT_UP) || g_bAppIsBrowser;
-                if (wParam == DETECT_REASON_MOUSE)
+                if (wParam == DETECT_REASON_MOUSE_BUTTON_UP)
                 {
                     int clickX = (short)LOWORD(lParam);
                     int clickY = (short)HIWORD(lParam);
@@ -1568,17 +1548,22 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
             {
                 g_bOverlayEnabled = false;
                 PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                            DETECT_REASON_KEY, (LPARAM)VK_ESCAPE);
+                            DETECT_REASON_KEY_DOWN, (LPARAM)VK_ESCAPE);
                 return 1; // block ESC from reaching the target app
             }
             PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                        DETECT_REASON_KEY, (LPARAM)pKB->vkCode);
+                        DETECT_REASON_KEY_DOWN, (LPARAM)pKB->vkCode);
         }
-        else if ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) &&
-                 (pKB->vkCode == VK_MENU || pKB->vkCode == VK_LMENU || pKB->vkCode == VK_RMENU ||
-                  pKB->vkCode == VK_CONTROL || pKB->vkCode == VK_LCONTROL || pKB->vkCode == VK_RCONTROL))
-            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                        DETECT_REASON_ALT_UP, 0);
+        else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
+        {
+            if (pKB->vkCode == VK_MENU || pKB->vkCode == VK_LMENU || pKB->vkCode == VK_RMENU ||
+                pKB->vkCode == VK_CONTROL || pKB->vkCode == VK_LCONTROL || pKB->vkCode == VK_RCONTROL)
+                PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                            DETECT_REASON_ALT_UP, 0);
+            else
+                PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                            DETECT_REASON_KEY_UP, (LPARAM)pKB->vkCode);
+        }
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
@@ -1586,12 +1571,19 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
     LRESULT res = CallNextHookEx(NULL, nCode, wParam, lParam);
-    if (nCode == HC_ACTION &&
-        (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN))
+    if (nCode == HC_ACTION)
     {
-        MSLLHOOKSTRUCT *pMS = (MSLLHOOKSTRUCT *)lParam;
-        PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
-                    DETECT_REASON_MOUSE, MAKELPARAM(pMS->pt.x, pMS->pt.y));
+        if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN)
+        {
+            g_bMouseButtonDown = true;
+        }
+        else if (wParam == WM_LBUTTONUP || wParam == WM_RBUTTONUP || wParam == WM_MBUTTONUP)
+        {
+            g_bMouseButtonDown = false;
+            MSLLHOOKSTRUCT *pMS = (MSLLHOOKSTRUCT *)lParam;
+            PostMessage(g_myWindowHandle, WM_APP_DETECT_CARET,
+                        DETECT_REASON_MOUSE_BUTTON_UP, MAKELPARAM(pMS->pt.x, pMS->pt.y));
+        }
     }
     return res;
 }

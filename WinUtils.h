@@ -72,6 +72,7 @@ MYGLOBAL(HDC          , g_hAnimBgDC , NULL ); // captured desktop behind overlay
 MYGLOBAL(bool         , g_bAppIsDevEnv , false);
 MYGLOBAL(bool         , g_bAppIsCode   , false);
 MYGLOBAL(bool         , g_bAppIsBrowser, false);
+MYGLOBAL(bool         , g_bMouseButtonDown, false);
 
 #ifdef WIN_UTILS_CPP
     char g_szAppExeName[64] = {};
